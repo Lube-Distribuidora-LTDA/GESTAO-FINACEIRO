@@ -2,6 +2,11 @@
    O navegador nunca fala com o banco: só estas funções, no servidor. */
 const { Pool } = require("pg");
 
+/* O pooler do Supabase responde em IPv4. Em ambiente sem rota IPv6, tentar AAAA
+   primeiro faz a conexão ficar pendurada até estourar o tempo da função — que foi
+   exatamente o que aconteceu no primeiro deploy. */
+try { require("dns").setDefaultResultOrder("ipv4first"); } catch (_) {}
+
 /* ref do projeto DATA WAREHOUSE. A máquina do Júlio tem variáveis de ambiente
    apontando para OUTRO projeto (painel-icms-lube); sem esta conferência, um
    deploy mal configurado escreveria no banco errado sem avisar. */

@@ -2,6 +2,10 @@
    Não devolve senha nem valor de variável: só presença, formato e o erro de cada porta.
    Apagar assim que a conexão estiver resolvida. */
 const { Client } = require("pg");
+const dns = require("dns");
+
+let ipv4first = false;
+try { dns.setDefaultResultOrder("ipv4first"); ipv4first = true; } catch (_) {}
 
 async function tentar(host, port, user, password) {
   const t0 = Date.now();
@@ -31,8 +35,19 @@ module.exports = async (req, res) => {
   const aspas = /^["'].*["']$/.test(senha);
   const espacos = senha !== senha.trim();
 
+  let enderecos = [];
+  try {
+    enderecos = (await dns.promises.lookup(host, { all: true })).map(function (e) {
+      return e.family + ":" + e.address;
+    });
+  } catch (e) {
+    enderecos = ["DNS falhou: " + e.code];
+  }
+
   const resultado = {
     regiao: process.env.VERCEL_REGION || "(desconhecida)",
+    ipv4first,
+    enderecos,
     host,
     porta_configurada: process.env.SUPABASE_DB_PORT || "(vazia)",
     usuario: user,
