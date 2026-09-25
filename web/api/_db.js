@@ -33,9 +33,9 @@ function config() {
     ssl: { rejectUnauthorized: false },
     max: 1,
     idleTimeoutMillis: 10000,
-    /* o primeiro handshake no transaction pooler leva ~7s quando ele está frio;
-       com 8s aqui a função morria com "connection timeout" antes de autenticar. */
-    connectionTimeoutMillis: 20000,
+    /* o primeiro handshake leva de 7 a 15s com o pooler frio; abaixo disso a conexão
+       é cortada antes de autenticar. Duas tentativas cabem no limite da função. */
+    connectionTimeoutMillis: 15000,
   };
 }
 
@@ -44,9 +44,25 @@ function getPool() {
   return pool;
 }
 
+function erroDeConexao(e) {
+  const m = String((e && e.message) || "");
+  return /timeout|ECONNRESET|ECONNREFUSED|terminated|ETIMEDOUT/i.test(m);
+}
+
+/* A função e o pooler acordam juntos: a primeira conexão depois de um tempo parado
+   leva de 10 a 20 segundos, e às vezes não completa. Quando isso acontece, o pool
+   é descartado e a chamada refeita — a segunda tentativa costuma responder na hora. */
 async function consultar(sql, params) {
-  const r = await getPool().query(sql, params);
-  return r.rows;
+  for (let tentativa = 1; ; tentativa++) {
+    try {
+      const r = await getPool().query(sql, params);
+      return r.rows;
+    } catch (e) {
+      if (tentativa >= 2 || !erroDeConexao(e)) throw e;
+      try { await pool.end(); } catch (_) {}
+      pool = null;
+    }
+  }
 }
 
 module.exports = { consultar };
