@@ -1,0 +1,13 @@
+ENV
+.env
+.env.local
+node_modules/
+.vercel
+*.log
+Thumbs.db
+desktop.ini
+
+# Dado de folha não entra no git: salário é nominal e identificável.
+# O lugar dele é o banco (schema financeiro), com RLS e acesso só pelo servidor.
+dados/*.json
+web/snapshot.js

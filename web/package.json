@@ -1,0 +1,9 @@
+{
+  "name": "gestao-financeiro-web",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Painel da Validação de Folha — Sistema Financeiro da Lube Distribuidora",
+  "dependencies": {
+    "pg": "8.13.1"
+  }
+}
