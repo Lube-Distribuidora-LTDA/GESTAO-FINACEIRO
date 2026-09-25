@@ -9,7 +9,8 @@ async function tentar(host, port, user, password) {
     host, port, user, password,
     database: process.env.SUPABASE_DB_NAME || "postgres",
     ssl: { rejectUnauthorized: false },
-    connectionTimeoutMillis: 12000,
+    connectionTimeoutMillis: 9000,
+    query_timeout: 5000,
   });
   try {
     await c.connect();
