@@ -5,9 +5,8 @@
   "use strict";
 
   var DEP = "ADMINISTRATIVO";
-  var LS = "folha-lube-offline-";
+  var LS = "folha-lube-";
   var dados = null;
-  var offline = false;
   var abertoIdx = null;
   var editando = null;
   var competenciaEscolhida = null; // null = sempre a mais recente
@@ -56,27 +55,26 @@
       })
       .then(function (j) {
         if (!j || !j.colaboradores) throw new Error("resposta sem dados");
-        dados = j; offline = false;
-      })
-      .catch(function (e) {
-        if (!window.__SNAPSHOT__) throw e;
-        dados = JSON.parse(JSON.stringify(window.__SNAPSHOT__));
-        offline = true;
-        aplicarLocal();
-        console.warn("API indisponível, usando snapshot embutido:", e.message);
+        dados = j;
       });
   }
 
-  /* quando o banco não responde, as ações ficam no navegador */
-  function aplicarLocal() {
-    var v = ls("validacao-" + DEP) || {};
-    var c = ls("correcao-" + DEP) || {};
-    var b = ls("beneficios");
-    dados.colaboradores.forEach(function (p) {
-      if (v[p.matricula]) p.validacao = v[p.matricula];
-      if (c[p.matricula]) p.correcoes = c[p.matricula];
-    });
-    if (b) dados.beneficios = b;
+  /* Quando uma gravação não chega ao banco, a marcação fica guardada aqui e a
+     tela diz isso — melhor que sumir em silêncio e o mês fechar errado. */
+  function pendentes() { return ls("pendentes-" + DEP) || []; }
+  function guardarPendente(payload) {
+    var fila = pendentes();
+    fila.push({ quando: new Date().toISOString(), payload: payload });
+    ls("pendentes-" + DEP, fila);
+    avisarPendencia();
+  }
+  function avisarPendencia() {
+    var fila = pendentes();
+    if (!fila.length) return;
+    document.getElementById("aviso").innerHTML =
+      '<div class="aviso erro"><span class="ic">⚠</span><div><b>' + fila.length +
+      " marcação(ões) não chegaram ao banco.</b> O banco recusou ou não respondeu na hora do clique. " +
+      "Recarregue a página e refaça essas marcações; se repetir, me chame.</div></div>";
   }
 
   function salvar(payload) {
@@ -198,9 +196,6 @@
   function pintarCompetencia() {
     document.getElementById("comp-base").textContent = mesAno(dados.competencia_anterior);
     var sel = document.getElementById("comp-select");
-    /* sem banco só existe a competência do snapshot; trocar de mês exige a API */
-    sel.disabled = offline;
-    sel.title = offline ? "Escolher outro mês precisa da conexão com o banco" : "";
     var lista = dados.competencias || [{ competencia: dados.competencia }];
     sel.innerHTML = lista.map(function (c, i) {
       var iso = String(c.competencia).slice(0, 10);
@@ -262,16 +257,12 @@
       "Competência " + mesAno(dados.competencia) + " comparada com " + mesAno(dados.competencia_anterior) +
       " · Lube Distribuidora Ltda · CNPJ 03.447.509/0001-75";
 
-    document.getElementById("rodape").innerHTML = offline
-      ? "Mostrando o <b>snapshot embutido de 24/09/2026</b>. As marcações ficam salvas só neste navegador."
-      : "Dados lidos do banco em <b>" + new Date(dados.gerado_em).toLocaleString("pt-BR") +
-        "</b> · schema <b>financeiro</b> do DATA WAREHOUSE.";
+    document.getElementById("rodape").innerHTML =
+      "Dados lidos do banco em <b>" + new Date(dados.gerado_em).toLocaleString("pt-BR") +
+      "</b> · schema <b>financeiro</b> do DATA WAREHOUSE.";
 
-    document.getElementById("aviso").innerHTML = offline
-      ? '<div class="aviso erro"><span class="ic">⚠</span><div><b>Sem conexão com o banco.</b> ' +
-        "O painel está mostrando o snapshot gravado no próprio arquivo, e o que você confirmar fica só neste navegador. " +
-        "Falta cadastrar <b>SUPABASE_DB_PASSWORD</b> nas variáveis de ambiente da Vercel.</div></div>"
-      : "";
+    document.getElementById("aviso").innerHTML = "";
+    avisarPendencia();
   }
 
   /* ------------------------------------------------ lista */
@@ -583,27 +574,23 @@
     persistirCorrecao(p, rub, valor, obs).then(function () { desenharModal(); render(); });
   }
 
-  function guardaLocal(chave, matricula, valor) {
-    var m = ls(chave + "-" + DEP) || {};
-    if (valor === null) delete m[matricula]; else m[matricula] = valor;
-    ls(chave + "-" + DEP, m);
-  }
-
   function persistirValidacao(p, v) {
-    guardaLocal("validacao", p.matricula, v ? p.validacao : null);
-    if (offline) return Promise.resolve();
-    return salvar({ tipo: "validacao", matricula: p.matricula, status: v || null })
-      .catch(function (e) { console.warn("não salvou no banco:", e.message); });
+    var payload = { tipo: "validacao", matricula: p.matricula, status: v || null };
+    return salvar(payload).catch(function (e) {
+      console.warn("não salvou no banco:", e.message);
+      guardarPendente(payload);
+    });
   }
   function persistirCorrecao(p, rub, valor, obs) {
-    guardaLocal("correcao", p.matricula, p.correcoes && p.correcoes.length ? p.correcoes : null);
-    guardaLocal("validacao", p.matricula, p.validacao);
-    if (offline) return Promise.resolve();
-    return salvar({
+    var payload = {
       tipo: "correcao", matricula: p.matricula, codigo: rub.codigo, referencia: rub.referencia || "",
       valor_original: Number(rub.valor), valor_corrigido: valor, observacao: obs,
       status: p.validacao ? p.validacao.status : null,
-    }).catch(function (e) { console.warn("não salvou no banco:", e.message); });
+    };
+    return salvar(payload).catch(function (e) {
+      console.warn("não salvou no banco:", e.message);
+      guardarPendente(payload);
+    });
   }
 
   /* ------------------------------------------------ configuração */
@@ -644,13 +631,13 @@
         novos.push({ codigo: b.codigo, valor: v });
       });
       if (erro) { alert("Confira os valores: use o formato 129,33"); return; }
-      ls("beneficios", dados.beneficios);
       this.disabled = true;
-      var fim = function () { fechar(); };
-      if (offline) return fim();
-      salvar({ tipo: "beneficios", beneficios: novos }).then(fim).catch(function (e) {
-        console.warn("não salvou no banco:", e.message); fim();
-      });
+      salvar({ tipo: "beneficios", beneficios: novos })
+        .catch(function (e) {
+          console.warn("não salvou no banco:", e.message);
+          guardarPendente({ tipo: "beneficios", beneficios: novos });
+        })
+        .then(fechar);
     });
   }
 

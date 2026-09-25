@@ -32,7 +32,6 @@ Status possíveis: `Conferido`, `Alerta`, `Revisar`, `Novo`, `Confirmado`, `Em v
 
 ```
 dados/      folha extraída dos PDFs, em JSON — FORA do git
-scripts/    gerar-snapshot.js — monta um web/snapshot.js local, para testar sem banco
 web/        painel publicado na Vercel
 web/api/    funções serverless (dados.js = leitura, acao.js = escrita)
 web/db/     SQL dos objetos de banco que o painel usa
@@ -40,12 +39,13 @@ web/db/     SQL dos objetos de banco que o painel usa
 
 ## Dado de folha não entra no git
 
-`dados/*.json` e `web/snapshot.js` estão no `.gitignore`. Salário é nominal e identificável:
-o lugar dele é o banco, com RLS ligado e leitura só pelo servidor. O repositório guarda código,
-schema e documentação — não guarda quanto cada pessoa ganha.
+`dados/*.json` está no `.gitignore`. Salário é nominal e identificável: o lugar dele é o banco,
+com RLS ligado e leitura só pelo servidor. O repositório guarda código, schema e documentação —
+não guarda quanto cada pessoa ganha.
 
-Por isso o painel publicado **só mostra número quando o banco responde**. Sem as variáveis de
-ambiente cadastradas, ele abre e diz o que está faltando, em vez de exibir dado velho.
+Por isso o painel **só mostra número quando o banco responde**. Se a conexão falhar, ele abre e
+diz o que está faltando, em vez de exibir dado velho de algum cache. E se um clique de
+Confirmar/Verificar não chegar ao banco, a tela avisa em vez de fingir que salvou.
 
 ## Banco
 
@@ -86,12 +86,11 @@ Achados da primeira validação:
 ## Rodar local
 
 ```bash
-node scripts/gerar-snapshot.js     # opcional: gera web/snapshot.js a partir de dados/
-npx serve web                      # ou qualquer servidor estático
+cd web && npm install && npx vercel dev
 ```
 
-Com o `snapshot.js` gerado, o painel abre sem banco e **avisa na tela** que está offline — o que
-for confirmado fica só naquele navegador. Esse arquivo é só para teste local e nunca é publicado.
+O painel precisa das rotas `/api`, então servidor estático puro não basta: use `vercel dev`, com o
+`ENV` preenchido, ou teste direto no deploy de preview.
 
 ## Variáveis de ambiente
 
