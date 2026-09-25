@@ -25,7 +25,9 @@ function config() {
     ssl: { rejectUnauthorized: false },
     max: 1,
     idleTimeoutMillis: 10000,
-    connectionTimeoutMillis: 8000,
+    /* o primeiro handshake no transaction pooler leva ~7s quando ele está frio;
+       com 8s aqui a função morria com "connection timeout" antes de autenticar. */
+    connectionTimeoutMillis: 20000,
   };
 }
 
