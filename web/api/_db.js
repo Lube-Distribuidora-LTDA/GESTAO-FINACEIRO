@@ -23,7 +23,10 @@ function config() {
 
   return {
     host: process.env.SUPABASE_DB_HOST || "aws-0-sa-east-1.pooler.supabase.com",
-    port: Number(process.env.SUPABASE_DB_PORT || 6543), // transaction pooler
+    /* 5432 = session pooler. O padrão da casa para função serverless é o transaction
+       pooler (6543), mas o deste projeto conecta e trava a consulta ("Query read
+       timeout"); o 5432 responde em menos de 1s. Medido em 2026-09-25. */
+    port: Number(process.env.SUPABASE_DB_PORT || 5432),
     database: process.env.SUPABASE_DB_NAME || "postgres",
     user: usuario,
     password: senha,

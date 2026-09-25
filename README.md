@@ -101,12 +101,29 @@ marcadas para **Production, Preview e Development**:
 | Variável | Valor |
 |---|---|
 | `SUPABASE_DB_HOST` | `aws-0-sa-east-1.pooler.supabase.com` |
-| `SUPABASE_DB_PORT` | `6543` (transaction pooler — é o que a função serverless usa) |
+| `SUPABASE_DB_PORT` | `5432` (session pooler — ver a nota abaixo) |
 | `SUPABASE_DB_NAME` | `postgres` |
 | `SUPABASE_DB_USER` | `postgres.ivcnotrynogaljrvvyes` |
 | `SUPABASE_DB_PASSWORD` | a senha do banco do projeto DATA WAREHOUSE |
 
 Só a última é segredo. Quem preenche é o Júlio — ela não entra em arquivo nem em documentação.
+
+### Por que 5432 e não 6543
+
+O padrão da casa manda usar o transaction pooler (6543) em função serverless. Neste projeto ele
+**conecta mas trava a consulta** (`Query read timeout`), e a função morria no limite de tempo.
+Medido da própria Vercel, em `gru1`, em 2026-09-25:
+
+| Porta | Resultado |
+|---|---|
+| 6543 (transaction pooler) | falha em ~5s com `Query read timeout` |
+| 5432 (session pooler) | responde em **0,95s**, autenticado |
+
+Por isso o sistema usa 5432, com `max: 1` no pool. Se o transaction pooler voltar ao normal, basta
+trocar a variável na Vercel — o código lê a porta do ambiente.
+
+A conexão também força IPv4 (`dns.setDefaultResultOrder("ipv4first")`): o pooler responde em IPv4 e
+tentar AAAA primeiro deixa a conexão pendurada até o tempo da função acabar.
 
 A função confere o `ref` do projeto no usuário do banco antes de conectar: a máquina do Júlio tem
 variáveis de ambiente apontando para o **painel-icms-lube**, e sem essa checagem um deploy mal
