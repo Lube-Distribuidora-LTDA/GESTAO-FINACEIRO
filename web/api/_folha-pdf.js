@@ -1,6 +1,19 @@
 /* Lê o PDF da folha do DP e devolve os colaboradores, as rubricas e o resumo.
    Só interpreta o que está impresso: não calcula nada e não completa nada.
    O que não der para ler com certeza vira erro, não vira chute. */
+
+/* O extrator é feito para navegador e espera DOMMatrix, ImageData e Path2D.
+   Na máquina eles vêm de um pacote nativo de canvas que a Vercel não instala, e
+   sem eles o módulo nem carrega. Como aqui só se extrai texto — nada é desenhado —
+   estes esboços bastam: com eles o texto sai igual, conferido contra as folhas. */
+if (typeof globalThis.DOMMatrix === "undefined") {
+  globalThis.DOMMatrix = class DOMMatrix {
+    constructor() { this.a = 1; this.b = 0; this.c = 0; this.d = 1; this.e = 0; this.f = 0; }
+  };
+}
+if (typeof globalThis.ImageData === "undefined") globalThis.ImageData = class ImageData {};
+if (typeof globalThis.Path2D === "undefined") globalThis.Path2D = class Path2D {};
+
 const { PDFParse } = require("pdf-parse");
 
 const num = (s) => {
@@ -19,6 +32,7 @@ const SIGLAS = { DP: 1, TI: 1, RH: 1, PCP: 1, CD: 1, SAC: 1, NF: 1, CPD: 1, EPI:
 function titulo(texto) {
   if (!texto) return texto;
   return String(texto)
+    .trim()
     .split(/\s+/)
     .map(function (palavra, i) {
       const alta = palavra.toLocaleUpperCase("pt-BR");
@@ -87,20 +101,14 @@ function lerTexto(texto) {
     /* Cabeçalho da pessoa: "001037 ALI PEREIRA DE JESUS \t4.500,00 \t723\t0000".
        Quando o nome é longo, o PDF gruda o valor nele ("...JULIANI1.928,14"), então
        o corte é feito no primeiro valor com centavos, não no tabulador. */
-    const pessoa = l.match(/^(\d{6})\s+(.*?)(\d{1,3}(?:\.\d{3})*,\d{2})(?:\s|\t|$)/);
+    const pessoa = l.match(/^(\d{6})\s+(\D*?)(\d{1,3}(?:\.\d{3})*,\d{2})/);
     if (pessoa) {
       atual = {
         matricula: pessoa[1],
-        nome: titulo(pessoa[2].replace(/\t/g, " ").trim()),
+        nome: titulo(pessoa[2].replace(/\t/g, " ")),
         salario_contratual: num(pessoa[3]),
-        funcao: null,
-        admissao: null,
-        dep_ir: 0,
-        dep_sf: 0,
-        evento: null,
-        rubricas: [],
-        totais: null,
-        bases: {},
+        funcao: null, admissao: null, dep_ir: 0, dep_sf: 0, evento: null,
+        rubricas: [], totais: null, bases: {},
       };
       colaboradores.push(atual);
       continue;
@@ -114,23 +122,17 @@ function lerTexto(texto) {
     if (dep) { atual.dep_ir = Number(dep[1]); atual.dep_sf = Number(dep[2]); continue; }
 
     const fun = l.match(/^Função\s*:\s*(.+)$/);
-    if (fun) { atual.funcao = titulo(fun[1].trim()); continue; }
+    if (fun) { atual.funcao = titulo(fun[1]); continue; }
 
-    if (/^(ATESTADO|Férias|FÉRIAS|AFASTAMENTO)/i.test(l.trim())) {
-      atual.evento = l.trim();
-      continue;
-    }
+    if (/^(ATESTADO|Férias|FÉRIAS|AFASTAMENTO)/i.test(l.trim())) { atual.evento = l.trim(); continue; }
 
     const bases = l.match(
       /Base INSS:\s*([\d.,]+)\s*\(Aliq\.:\s*([^)]+)\)\s*\tBase FGTS:\s*([\d.,]+)\s*\(Valor:\s*([\d.,]+)\)(?:\s*\tBase IRRF Folha:\s*([\d.,]+))?/
     );
     if (bases) {
       atual.bases = {
-        inss: num(bases[1]),
-        aliquota: bases[2].trim(),
-        fgts: num(bases[3]),
-        fgts_valor: num(bases[4]),
-        irrf: bases[5] ? num(bases[5]) : null,
+        inss: num(bases[1]), aliquota: bases[2].trim(), fgts: num(bases[3]),
+        fgts_valor: num(bases[4]), irrf: bases[5] ? num(bases[5]) : null,
       };
       atual = null; // o recibo dessa pessoa terminou
       continue;
@@ -141,7 +143,8 @@ function lerTexto(texto) {
       const t = (linhas[i + 1] || "").split("\t").map((c) => c.trim()).filter(Boolean);
       if (t.length === 3) {
         const [p, d, liq] = t.map(num);
-        if (p !== null && d !== null && liq !== null) atual.totais = { proventos: p, descontos: d, liquido: liq };
+        if (p !== null && d !== null && liq !== null && Math.abs(p - d - liq) < 0.005)
+          atual.totais = { proventos: p, descontos: d, liquido: liq };
       }
       continue;
     }
@@ -154,11 +157,11 @@ function lerTexto(texto) {
   }
 
   /* resumo impresso no fim: acha o trio geral / descontos / líquido pela própria identidade */
-  const fim = linhas.slice(linhas.findIndex((l) => /Resumo da folha/i.test(l)));
+  const inicioResumo = linhas.findIndex((l) => /Resumo da folha/i.test(l));
   const numeros = [];
-  fim.forEach((l) =>
-    l.split(/\s|\t/).forEach((p) => {
-      const v = num(p.replace(/\*/g, ""));
+  linhas.slice(inicioResumo < 0 ? linhas.length : inicioResumo).forEach((l) =>
+    l.split(/\s|\t|\*/).forEach((p) => {
+      const v = num(p);
       if (v !== null) numeros.push(v);
     })
   );
@@ -167,26 +170,23 @@ function lerTexto(texto) {
     const [g, d, liq] = [numeros[i], numeros[i + 1], numeros[i + 2]];
     if (g > 0 && d >= 0 && Math.abs(g - d - liq) < 0.005) {
       const pessoas = numeros.slice(i + 3).find((v) => Number.isInteger(v) && v > 0 && v < 10000);
-      resumo = { proventos: g, descontos: d, liquido: liq, pessoas: pessoas ?? null };
+      resumo = { proventos: g, descontos: d, liquido: liq, pessoas: pessoas === undefined ? null : pessoas };
       break;
     }
   }
   if (!resumo) erros.push("Não encontrei o resumo da folha no fim do PDF");
   if (!competencia) erros.push("Não encontrei a competência (linha Ref.: do cabeçalho)");
   if (!departamentoPdf) erros.push("Não encontrei o departamento no cabeçalho");
+  if (!colaboradores.length) erros.push("Não encontrei nenhum colaborador — o arquivo é mesmo a folha de pagamento?");
 
   colaboradores.forEach((c) => {
-    if (!c.totais) erros.push(`${c.matricula} ${c.nome}: não li os totais do recibo`);
-    else {
-      const p = c.rubricas.filter((r) => r.tipo === "P").reduce((a, r) => a + r.valor, 0);
-      const d = c.rubricas.filter((r) => r.tipo === "D").reduce((a, r) => a + r.valor, 0);
-      if (Math.abs(p - c.totais.proventos) > 0.005)
-        erros.push(`${c.matricula} ${c.nome}: proventos das rubricas (${p.toFixed(2)}) diferem do total do recibo (${c.totais.proventos.toFixed(2)})`);
-      if (Math.abs(d - c.totais.descontos) > 0.005)
-        erros.push(`${c.matricula} ${c.nome}: descontos das rubricas (${d.toFixed(2)}) diferem do total do recibo (${c.totais.descontos.toFixed(2)})`);
-      if (Math.abs(c.totais.proventos - c.totais.descontos - c.totais.liquido) > 0.005)
-        erros.push(`${c.matricula} ${c.nome}: o recibo não fecha (proventos − descontos ≠ líquido)`);
-    }
+    if (!c.totais) { erros.push(`${c.matricula} ${c.nome}: não consegui ler os totais do recibo`); return; }
+    const p = c.rubricas.filter((r) => r.tipo === "P").reduce((a, r) => a + r.valor, 0);
+    const d = c.rubricas.filter((r) => r.tipo === "D").reduce((a, r) => a + r.valor, 0);
+    if (Math.abs(p - c.totais.proventos) > 0.005)
+      erros.push(`${c.matricula} ${c.nome}: proventos das rubricas (${p.toFixed(2)}) diferem do total do recibo (${c.totais.proventos.toFixed(2)})`);
+    if (Math.abs(d - c.totais.descontos) > 0.005)
+      erros.push(`${c.matricula} ${c.nome}: descontos das rubricas (${d.toFixed(2)}) diferem do total do recibo (${c.totais.descontos.toFixed(2)})`);
   });
 
   /* a soma dos recibos tem que bater com o resumo impresso — senão faltou gente ou sobrou */
