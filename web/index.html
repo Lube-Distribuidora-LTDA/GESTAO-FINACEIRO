@@ -266,11 +266,87 @@ button,input,select{font-family:inherit;font-weight:500;}
 .x:hover{color:#fff;background:#27407c;transform:rotate(90deg);}
 .modal-body{padding:20px 24px 8px;}
 
+/* Evento do mês (férias, atestado, admissão): é o que explica um valor fora do lugar,
+   então tem que saltar aos olhos — não pode passar como recado discreto. */
 .evt{
-  display:flex;gap:11px;align-items:flex-start;background:rgba(95,178,255,.07);border:1px solid var(--info-line);
-  border-radius:11px;padding:13px 16px;font-size:13.5px;color:var(--txt-2);margin-bottom:16px;line-height:1.6;
+  display:flex;gap:13px;align-items:center;
+  background:linear-gradient(100deg,rgba(255,179,64,.22),rgba(255,179,64,.08));
+  border:1px solid var(--amber);border-left:5px solid var(--amber);
+  border-radius:11px;padding:14px 17px;font-size:14px;color:var(--txt-1);margin-bottom:16px;line-height:1.55;
+  box-shadow:0 0 0 1px rgba(255,179,64,.12), 0 14px 34px -22px var(--amber);
 }
-.evt b{color:var(--txt-1);font-weight:700;}
+.evt .sino{
+  width:34px;height:34px;border-radius:9px;background:var(--amber);color:#2a1800;flex:none;
+  display:flex;align-items:center;justify-content:center;font-size:19px;font-weight:800;
+  font-family:"Archivo";
+}
+.evt b{color:var(--amber);font-weight:800;text-transform:uppercase;letter-spacing:.04em;font-size:12px;}
+.evt .txt{font-weight:600;}
+
+/* abas do detalhe */
+.abas{display:flex;gap:6px;border-bottom:1px solid var(--line-1);margin-bottom:4px;}
+.aba{
+  padding:10px 16px;border:none;background:transparent;color:var(--txt-3);font-size:13.5px;font-weight:700;
+  cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;transition:all .16s var(--ease);
+}
+.aba:hover{color:var(--txt-1);}
+.aba.ativa{color:var(--txt-1);border-bottom-color:var(--brand-blue-lt);}
+.aba .qtd{
+  display:inline-block;margin-left:7px;font-family:"JetBrains Mono";font-size:10px;font-weight:700;
+  padding:2px 7px;border-radius:99px;background:var(--amber-dim);color:var(--amber);border:1px solid var(--amber-line);
+}
+
+/* observações */
+.obs-lista{display:flex;flex-direction:column;gap:10px;margin:14px 0 18px;}
+.obs-item{
+  display:flex;gap:12px;align-items:flex-start;background:var(--navy-850);border:1px solid var(--line-1);
+  border-left:4px solid var(--txt-3);border-radius:11px;padding:13px 16px;font-size:13.5px;line-height:1.6;
+}
+.obs-item.grave{border-left-color:var(--brand-red-lt);background:rgba(229,32,44,.09);}
+.obs-item.atencao{border-left-color:var(--amber);background:rgba(255,179,64,.09);}
+.obs-item.info{border-left-color:var(--info);}
+.obs-item .marca{font-size:17px;line-height:1.2;flex:none;}
+.obs-item .t{font-weight:700;color:var(--txt-1);display:block;margin-bottom:3px;}
+.obs-item .d{color:var(--txt-2);font-weight:500;}
+.obs-item .d b{color:var(--txt-1);font-family:"JetBrains Mono";font-weight:700;}
+.obs-vazio{
+  text-align:center;color:var(--txt-3);padding:26px 16px;font-size:13.5px;
+  border:1px dashed var(--line-2);border-radius:12px;margin:14px 0 18px;
+}
+.obs-campo{display:flex;flex-direction:column;gap:8px;margin-bottom:8px;}
+.obs-campo label{font-size:10.5px;text-transform:uppercase;letter-spacing:.11em;color:var(--txt-3);font-weight:700;}
+.obs-campo textarea{
+  background:var(--navy-900);border:1px solid var(--line-2);border-radius:10px;color:var(--txt-1);
+  padding:12px 14px;font-size:13.5px;font-family:"IBM Plex Sans";font-weight:500;line-height:1.6;
+  min-height:96px;resize:vertical;
+}
+.obs-campo textarea:focus{outline:2px solid var(--brand-blue-lt);outline-offset:1px;border-color:transparent;}
+.obs-salva{font-size:12px;color:var(--txt-3);}
+
+/* importação de folha */
+.imp-zona{
+  border:2px dashed var(--line-2);border-radius:14px;padding:30px 20px;text-align:center;
+  background:var(--navy-850);transition:all .18s var(--ease);cursor:pointer;
+}
+.imp-zona:hover,.imp-zona.sobre{border-color:var(--brand-blue-lt);background:rgba(42,65,200,.12);}
+.imp-zona .ic{font-size:30px;line-height:1;margin-bottom:10px;}
+.imp-zona .t{font-size:15px;font-weight:700;color:var(--txt-1);}
+.imp-zona .d{font-size:12.5px;color:var(--txt-3);margin-top:6px;}
+.imp-arquivo{
+  display:flex;align-items:center;gap:12px;background:var(--navy-850);border:1px solid var(--line-2);
+  border-radius:11px;padding:13px 16px;font-size:13.5px;margin-bottom:16px;
+}
+.imp-arquivo .nome{font-weight:700;color:var(--txt-1);}
+.imp-arquivo .tam{color:var(--txt-3);font-size:12px;}
+.conf-tbl{width:100%;border-collapse:collapse;font-size:13.5px;margin-top:6px;}
+.conf-tbl th{
+  text-align:right;font-size:10.5px;text-transform:uppercase;letter-spacing:.11em;color:var(--txt-3);
+  font-weight:700;padding:9px 11px;border-bottom:1px solid var(--line-1);
+}
+.conf-tbl th:first-child,.conf-tbl td:first-child{text-align:left;}
+.conf-tbl td{padding:10px 11px;border-bottom:1px solid rgba(30,48,89,.45);text-align:right;font-weight:600;}
+.conf-tbl td.ok{color:var(--green);} .conf-tbl td.nao{color:var(--brand-red-lt);}
+.conf-tbl .rot{color:var(--txt-2);font-weight:600;}
 
 .mini{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;}
 .mini .card{background:var(--navy-850);border:1px solid var(--line-1);border-radius:12px;padding:13px 15px;}
@@ -457,6 +533,10 @@ button,input,select{font-family:inherit;font-weight:500;}
           <span class="sep">→</span>
           <select id="comp-select" aria-label="Competência a validar"></select>
         </div>
+        <button class="btn-cfg" id="open-imp">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5-5 5 5"/><path d="M12 5v13"/></svg>
+          Importar folha
+        </button>
         <button class="btn-cfg" id="open-cfg">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
           Configurar benefícios
@@ -498,8 +578,8 @@ button,input,select{font-family:inherit;font-weight:500;}
         <div class="idx">#</div>
         <div>Colaborador</div>
         <div class="num col-contratual">Sal. contratual</div>
-        <div class="num col-liquido">Líquido</div>
-        <div class="num col-delta">Variação</div>
+        <div class="num col-liquido">Salário base</div>
+        <div class="num col-delta">Variação do salário base</div>
         <div style="text-align:right;">Status</div>
       </div>
       <div id="rows"><div class="carregando">Carregando a folha…</div></div>

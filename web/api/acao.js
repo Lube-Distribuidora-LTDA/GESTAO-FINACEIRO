@@ -44,6 +44,21 @@ module.exports = async (req, res) => {
 
     if (!comp || !b.matricula) throw new Error("competência e matrícula são obrigatórias");
 
+    /* anotação sobre o que não bate. Quem anota está conferindo: se a pessoa ainda
+       não tinha status, entra como "verificar" — nunca fecha o mês sozinha. */
+    if (b.tipo === "observacao") {
+      await consultar(
+        `insert into financeiro.validacao_folha
+           (competencia, departamento, matricula, status, observacao, usuario, atualizado_em)
+         values ($1::date, $2, $3, 'verificar', $4, 'painel', now())
+         on conflict (competencia, departamento, matricula)
+         do update set observacao = excluded.observacao, usuario = excluded.usuario, atualizado_em = now()`,
+        [comp, dep, b.matricula, b.observacao || null]
+      );
+      res.status(200).send(JSON.stringify({ ok: true }));
+      return;
+    }
+
     if (b.tipo === "validacao") {
       if (b.status === null || b.status === undefined || b.status === "") {
         await consultar(

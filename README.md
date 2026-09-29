@@ -16,13 +16,22 @@ departamento, se o que foi pago no mês anterior continua sendo pago no mês atu
    sem ninguém mexer em nada. Quem decide é a função `painel_dados()`, pelo `max(competencia)`.
    O que foi confirmado num mês é o que serve de referência na comparação do mês seguinte.
    O seletor no topo permite olhar competências anteriores.
+0.5. **A folha do mês entra pelo próprio painel.** O botão *Importar folha* recebe o PDF que o DP
+   manda, lê colaboradores e rubricas, e **confere os totais com o resumo impresso na última página**
+   antes de gravar. Se algum total não bater, ou se o recibo de alguém não fechar, nada é gravado e a
+   tela diz o que divergiu. O parser está em `web/api/_folha-pdf.js` e foi conferido contra as folhas
+   de agosto e setembro/2026: reproduz as mesmas 158 rubricas que tinham sido carregadas à mão.
 1. **Compara salário contratual e função** de cada colaborador entre a competência anterior e a atual.
 2. Sem alteração nesses dois campos → passa direto, **sem alarme**. Variação de líquido por férias,
    atestado, admissão no meio do mês ou parcela de empréstimo não é alteração de contrato.
 3. Alteração no salário contratual ou na função → **Alerta**.
 4. Benefício descontado fora da tabela de referência (dobro, triplo, valor quebrado) → **Revisar**.
+4.5. **A variação da lista é a do salário base** (rubrica 001), não a do líquido: vale, adiantamento
+   e parcela de empréstimo mexem no total pago todo mês sem que nada no contrato tenha mudado.
 5. Clicar em qualquer pessoa abre o **comparativo completo**: todas as rubricas lado a lado,
-   totais, bases de INSS/FGTS/IRRF e os eventos do mês.
+   totais, bases de INSS/FGTS/IRRF e os eventos do mês. A aba **Observações** descreve em português
+   tudo o que não fecha — contrato, salário base e benefício cobrado fora da tabela (em dobro, em
+   triplo ou com valor quebrado) — e guarda a anotação de quem conferiu.
 6. Cada rubrica pode ser **corrigida à mão**, com observação. O valor original fica guardado ao lado.
 7. **Confirmar** fecha a pessoa e o valor vira referência do mês seguinte. **Verificar** mantém pendente.
 

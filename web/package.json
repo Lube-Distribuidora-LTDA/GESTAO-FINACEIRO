@@ -4,6 +4,7 @@
   "private": true,
   "description": "Painel da Validação de Folha — Sistema Financeiro da Lube Distribuidora",
   "dependencies": {
+    "pdf-parse": "^2.4.5",
     "pg": "8.13.1"
   }
 }
