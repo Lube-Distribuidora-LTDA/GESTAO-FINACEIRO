@@ -359,7 +359,7 @@
       var titulo = rub.tipo === "P" ? "Proventos" : "Descontos";
       if (titulo !== secao) {
         secao = titulo;
-        html += '<tr class="sub-head"><td colspan="6">' + titulo + "</td></tr>";
+        html += '<tr class="sub-head ' + (rub.tipo === "P" ? "p" : "d") + '"><td colspan="6">' + titulo + "</td></tr>";
       }
       var va = valorEfetivo(p, l.ago), vs = valorEfetivo(p, l.set);
       var dif = va !== null && vs !== null ? vs - va : null;
@@ -419,7 +419,7 @@
         '</td><td class="mono">' + num(vs) + '</td><td class="mono">' + dt + "</td><td></td></tr>";
     }
     var a = p.anterior;
-    html += '<tr class="sub-head"><td colspan="6">Totais do recibo</td></tr>';
+    html += '<tr class="sub-head t"><td colspan="6">Totais do recibo</td></tr>';
     html += tot("Total de proventos", a ? a.proventos : null, p.proventos);
     html += tot("Total de descontos", a ? a.descontos : null, p.descontos);
     html += tot("Líquido a receber", a ? a.liquido : null, p.liquido);
