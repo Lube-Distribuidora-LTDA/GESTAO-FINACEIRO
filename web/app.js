@@ -576,33 +576,66 @@
 
   var MARCA = { grave: "⛔", atencao: "⚠", info: "ℹ" };
 
-  /* Rótulo curto para a lista: a anotação de quem conferiu tem prioridade;
-     sem ela, o próprio motivo vira etiqueta (ATESTADO, FÉRIAS, SALÁRIO...). */
+  /* Rótulo curto para a lista. A anotação de quem conferiu tem prioridade; sem ela,
+     os motivos viram etiqueta — e uma pessoa pode ter mais de um ao mesmo tempo
+     (férias no mês anterior E benefício fora da tabela, por exemplo). */
   function observacaoCurta(p) {
     var anotacao = (p.validacao && p.validacao.observacao || "").trim();
     if (anotacao) return { texto: anotacao, tipo: "anotada", completo: anotacao };
 
-    var evento = p.evento || "";
-    if (/atestado/i.test(evento)) return { texto: "Atestado", tipo: "evento", completo: evento };
-    if (/férias|ferias/i.test(evento)) return { texto: "Férias", tipo: "evento", completo: evento };
-    if (/admitid|admiss/i.test(evento)) return { texto: "Admissão", tipo: "evento", completo: evento };
-    if (/afastament/i.test(evento)) return { texto: "Afastamento", tipo: "evento", completo: evento };
+    var motivos = [];
+    var detalhes = [];
 
-    if (!p.anterior) return { texto: "Admissão", tipo: "evento", completo: "Primeiro pagamento desta pessoa" };
+    function evento(texto, quando) {
+      if (!texto) return;
+      if (/atestado/i.test(texto)) motivos.push("Atestado");
+      else if (/férias|ferias/i.test(texto)) motivos.push("Férias");
+      else if (/admitid|admiss/i.test(texto)) motivos.push("Admissão");
+      else if (/afastament/i.test(texto)) motivos.push("Afastamento");
+      else return;
+      detalhes.push(quando + ": " + texto);
+    }
+    evento(p.evento, mesAno(dados.competencia).split("/")[0]);
+    if (p.anterior) evento(p.anterior.evento, mesAno(dados.competencia_anterior).split("/")[0]);
 
-    var partes = [];
-    if (p.funcao !== p.anterior.funcao) partes.push("Função");
-    if (Number(p.salario_contratual) !== Number(p.anterior.salario_contratual)) partes.push("Salário");
-    if (partes.length) return { texto: partes.join(" e "), tipo: "contrato", completo: "Mudou " + partes.join(" e ").toLowerCase() + " em relação ao mês anterior" };
+    /* A folha não escreve "admitido neste mês" em lugar nenhum: quem entrou no meio do
+       mês aparece só com o salário proporcional. A data de admissão é que conta. */
+    var mes = function (d) { return String(d || "").slice(0, 7); };
+    var admitidoAgora = mes(p.admissao) === mes(dados.competencia);
+    var admitidoAntes = mes(p.admissao) === mes(dados.competencia_anterior);
+    if ((admitidoAgora || admitidoAntes || !p.anterior) && motivos.indexOf("Admissão") < 0) {
+      motivos.push("Admissão");
+      detalhes.push(
+        !p.anterior && !admitidoAgora
+          ? "Primeiro pagamento desta pessoa"
+          : "Admitido em " + dataBR(p.admissao) + ", com o mês pago proporcional"
+      );
+    }
 
-    if (statusBase(p) === "revisar")
-      return { texto: "Benefício", tipo: "beneficio", completo: "Benefício descontado fora do valor da tabela" };
+    var contrato = [];
+    if (p.anterior) {
+      if (p.funcao !== p.anterior.funcao) contrato.push("Função");
+      if (Number(p.salario_contratual) !== Number(p.anterior.salario_contratual)) contrato.push("Salário");
+    }
+    if (contrato.length) {
+      motivos = motivos.concat(contrato);
+      detalhes.push("Mudou " + contrato.join(" e ").toLowerCase() + " em relação ao mês anterior");
+    }
 
-    var eventoAnterior = (p.anterior && p.anterior.evento) || "";
-    if (/férias|ferias/i.test(eventoAnterior)) return { texto: "Voltou de férias", tipo: "evento", completo: eventoAnterior };
-    if (/atestado/i.test(eventoAnterior)) return { texto: "Atestado no mês anterior", tipo: "evento", completo: eventoAnterior };
+    if (statusBase(p) === "revisar") {
+      motivos.push("Benefício");
+      detalhes.push("Benefício descontado fora do valor da tabela");
+    }
 
-    return null;
+    if (!motivos.length) return null;
+
+    /* a cor segue o motivo mais grave: contrato é alerta, o resto é atenção */
+    var tipo = contrato.length ? "contrato" : "evento";
+    var texto = motivos.length === 1
+      ? motivos[0]
+      : motivos.slice(0, -1).join(", ") + " e " + motivos[motivos.length - 1];
+
+    return { texto: texto, tipo: tipo, completo: detalhes.join("\n") };
   }
 
   function painelObservacoes(p, obs) {
