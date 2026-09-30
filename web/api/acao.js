@@ -23,6 +23,7 @@ module.exports = async (req, res) => {
 
   try {
     const b = corpo(req);
+    const emp = b.empresa || "LUBE";
     const dep = b.departamento || "ADMINISTRATIVO";
     const comp = b.competencia;
 
@@ -49,11 +50,11 @@ module.exports = async (req, res) => {
     if (b.tipo === "observacao") {
       await consultar(
         `insert into financeiro.validacao_folha
-           (competencia, departamento, matricula, status, observacao, usuario, atualizado_em)
-         values ($1::date, $2, $3, 'verificar', $4, 'painel', now())
-         on conflict (competencia, departamento, matricula)
+           (competencia, empresa, departamento, matricula, status, observacao, usuario, atualizado_em)
+         values ($1::date, $2, $3, $4, 'verificar', $5, 'painel', now())
+         on conflict (competencia, empresa, departamento, matricula)
          do update set observacao = excluded.observacao, usuario = excluded.usuario, atualizado_em = now()`,
-        [comp, dep, b.matricula, b.observacao || null]
+        [comp, emp, dep, b.matricula, b.observacao || null]
       );
       res.status(200).send(JSON.stringify({ ok: true }));
       return;
@@ -63,19 +64,19 @@ module.exports = async (req, res) => {
       if (b.status === null || b.status === undefined || b.status === "") {
         await consultar(
           `delete from financeiro.validacao_folha
-            where competencia = $1::date and departamento = $2 and matricula = $3`,
-          [comp, dep, b.matricula]
+            where competencia = $1::date and empresa = $2 and departamento = $3 and matricula = $4`,
+          [comp, emp, dep, b.matricula]
         );
       } else {
         if (!STATUS_VALIDOS.includes(b.status)) throw new Error("status inválido");
         await consultar(
           `insert into financeiro.validacao_folha
-             (competencia, departamento, matricula, status, observacao, usuario, atualizado_em)
-           values ($1::date, $2, $3, $4, $5, 'painel', now())
-           on conflict (competencia, departamento, matricula)
+             (competencia, empresa, departamento, matricula, status, observacao, usuario, atualizado_em)
+           values ($1::date, $2, $3, $4, $5, $6, 'painel', now())
+           on conflict (competencia, empresa, departamento, matricula)
            do update set status = excluded.status, observacao = excluded.observacao,
                          usuario = excluded.usuario, atualizado_em = now()`,
-          [comp, dep, b.matricula, b.status, b.observacao || null]
+          [comp, emp, dep, b.matricula, b.status, b.observacao || null]
         );
       }
       res.status(200).send(JSON.stringify({ ok: true }));
@@ -87,23 +88,23 @@ module.exports = async (req, res) => {
       if (b.valor_corrigido === null || b.valor_corrigido === undefined) {
         await consultar(
           `delete from financeiro.correcao_folha
-            where competencia = $1::date and departamento = $2 and matricula = $3
-              and codigo = $4 and referencia = $5`,
-          [comp, dep, b.matricula, b.codigo, ref]
+            where competencia = $1::date and empresa = $2 and departamento = $3 and matricula = $4
+              and codigo = $5 and referencia = $6`,
+          [comp, emp, dep, b.matricula, b.codigo, ref]
         );
       } else {
         const valor = Number(b.valor_corrigido);
         if (!isFinite(valor)) throw new Error("valor corrigido inválido");
         await consultar(
           `insert into financeiro.correcao_folha
-             (competencia, departamento, matricula, codigo, referencia,
+             (competencia, empresa, departamento, matricula, codigo, referencia,
               valor_original, valor_corrigido, observacao, usuario, atualizado_em)
-           values ($1::date, $2, $3, $4, $5, $6, $7, $8, 'painel', now())
-           on conflict (competencia, departamento, matricula, codigo, referencia)
+           values ($1::date, $2, $3, $4, $5, $6, $7, $8, $9, 'painel', now())
+           on conflict (competencia, empresa, departamento, matricula, codigo, referencia)
            do update set valor_original = excluded.valor_original,
                          valor_corrigido = excluded.valor_corrigido,
                          observacao = excluded.observacao, atualizado_em = now()`,
-          [comp, dep, b.matricula, b.codigo, ref,
+          [comp, emp, dep, b.matricula, b.codigo, ref,
            b.valor_original === undefined ? null : Number(b.valor_original), valor, b.observacao || null]
         );
       }
@@ -111,17 +112,17 @@ module.exports = async (req, res) => {
       if (b.status && STATUS_VALIDOS.includes(b.status)) {
         await consultar(
           `insert into financeiro.validacao_folha
-             (competencia, departamento, matricula, status, usuario, atualizado_em)
-           values ($1::date, $2, $3, $4, 'painel', now())
-           on conflict (competencia, departamento, matricula)
+             (competencia, empresa, departamento, matricula, status, usuario, atualizado_em)
+           values ($1::date, $2, $3, $4, $5, 'painel', now())
+           on conflict (competencia, empresa, departamento, matricula)
            do update set status = excluded.status, usuario = excluded.usuario, atualizado_em = now()`,
-          [comp, dep, b.matricula, b.status]
+          [comp, emp, dep, b.matricula, b.status]
         );
       } else if (b.status === null) {
         await consultar(
           `delete from financeiro.validacao_folha
-            where competencia = $1::date and departamento = $2 and matricula = $3 and status = 'corrigido'`,
-          [comp, dep, b.matricula]
+            where competencia = $1::date and empresa = $2 and departamento = $3 and matricula = $4 and status = 'corrigido'`,
+          [comp, emp, dep, b.matricula]
         );
       }
 

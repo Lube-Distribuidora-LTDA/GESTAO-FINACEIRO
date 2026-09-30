@@ -73,15 +73,37 @@ function lerRubrica(linha) {
   return { codigo, descricao, valor, referencia };
 }
 
-/* Proventos e descontos são separados pelo código, como no recibo:
-   001 salário, 016 ajuda de custo, 056 atestado e 437 estorno entram como provento. */
-const PROVENTOS = { "001": 1, "016": 1, "056": 1, "437": 1 };
+/* Proventos e descontos são separados pelo código, como no recibo. O PDF não traz
+   a coluna P/D, então a lista é explícita — e a conferência de cada recibo (soma das
+   rubricas contra o total impresso) é o que garante que nenhum código está no lado
+   errado. Lista levantada nas folhas das cinco filiais, ago/set 2026. */
+const PROVENTOS = {
+  "001": 1, // Salário Base
+  "016": 1, // Ajuda de Custo
+  "023": 1, // Adicional noturno 30%
+  "035": 1, // Adicional Noturno 20%
+  "037": 1, // Gratificação
+  "056": 1, // Dias de Atestado
+  "064": 1, // Hora extra 70%
+  "066": 1, // Hora Extra 50%
+  "400": 1, // Comissão
+  "401": 1, // Hora Extra 50%
+  "409": 1, // Premiação
+  "415": 1, // Prêmio
+  "420": 1, // Repouso Remunerado
+  "437": 1, // Estorno de Provisão (Crédito Trabalhador)
+  "599": 1, // Salário Família
+  "998": 1, // Insuficiência de Saldo (o lado que entra; 609 é o que sai)
+};
 
 function lerTexto(texto) {
   const linhas = texto.split("\n").map((l) => l.replace(/\s+$/, ""));
 
   let competencia = null;
-  let departamentoPdf = null;
+  let departamentoPdf = null;   // o primeiro do arquivo
+  let departamentoAtual = null; // muda a cada cabeçalho "Código / Nome / Ref."
+  const departamentos = [];
+  let empresa = null, empresaCodigo = null;
   const colaboradores = [];
   let atual = null;
   const erros = [];
@@ -93,9 +115,19 @@ function lerTexto(texto) {
       const ref = l.match(/^(\d{2}\/\d{2}\/\d{4})\s+(\d{2}\/\d{2}\/\d{4})/);
       if (ref) competencia = dataISO(ref[1]);
     }
-    if (!departamentoPdf && /^Código\s*\t/.test(l)) {
+    /* "00001\tLUBE DISTRIBUIDORA LTDA\tEmpresa :" — a filial vem no cabeçalho de cada página */
+    if (!empresa) {
+      const emp = l.match(/^(\d{5})\s*\t\s*(.+?)\s*\tEmpresa\s*:/);
+      if (emp) { empresaCodigo = emp[1]; empresa = emp[2].trim(); }
+    }
+    /* Um arquivo pode trazer vários departamentos, cada um com seu cabeçalho e seu resumo. */
+    if (/^Código\s*\t/.test(l)) {
       const proxima = (linhas[i + 1] || "").trim();
-      if (proxima && !/\d/.test(proxima)) departamentoPdf = proxima;
+      if (proxima && !/\d/.test(proxima)) {
+        departamentoAtual = proxima;
+        if (!departamentoPdf) departamentoPdf = proxima;
+        if (departamentos.indexOf(proxima) < 0) departamentos.push(proxima);
+      }
     }
 
     /* Cabeçalho da pessoa: "001037 ALI PEREIRA DE JESUS \t4.500,00 \t723\t0000".
@@ -105,6 +137,7 @@ function lerTexto(texto) {
     if (pessoa) {
       atual = {
         matricula: pessoa[1],
+        departamento: departamentoAtual,
         nome: titulo(pessoa[2].replace(/\t/g, " ")),
         salario_contratual: num(pessoa[3]),
         funcao: null, admissao: null, dep_ir: 0, dep_sf: 0, evento: null,
@@ -156,25 +189,63 @@ function lerTexto(texto) {
     }
   }
 
-  /* resumo impresso no fim: acha o trio geral / descontos / líquido pela própria identidade */
-  const inicioResumo = linhas.findIndex((l) => /Resumo da folha/i.test(l));
-  const numeros = [];
-  linhas.slice(inicioResumo < 0 ? linhas.length : inicioResumo).forEach((l) =>
-    l.split(/\s|\t|\*/).forEach((p) => {
-      const v = num(p);
-      if (v !== null) numeros.push(v);
-    })
-  );
-  let resumo = null;
-  for (let i = 0; i + 2 < numeros.length; i++) {
-    const [g, d, liq] = [numeros[i], numeros[i + 1], numeros[i + 2]];
-    if (g > 0 && d >= 0 && Math.abs(g - d - liq) < 0.005) {
-      const pessoas = numeros.slice(i + 3).find((v) => Number.isInteger(v) && v > 0 && v < 10000);
-      resumo = { proventos: g, descontos: d, liquido: liq, pessoas: pessoas === undefined ? null : pessoas };
-      break;
+  /* Resumo impresso: um bloco por departamento (ou um só, quando o arquivo é de um
+     departamento). Cada bloco cobre os departamentos abertos desde o bloco anterior.
+     O trio geral / descontos / líquido é achado pela própria identidade. */
+  function lerBloco(ini, fim) {
+    const numeros = [];
+    linhas.slice(ini, fim).forEach((l) =>
+      l.split(/\s|\t|\*/).forEach((p) => {
+        const v = num(p);
+        if (v !== null) numeros.push(v);
+      })
+    );
+    for (let i = 0; i + 2 < numeros.length; i++) {
+      const [g, d, liq] = [numeros[i], numeros[i + 1], numeros[i + 2]];
+      if (g > 0 && d >= 0 && Math.abs(g - d - liq) < 0.005) {
+        const pessoas = numeros.slice(i + 3).find((v) => Number.isInteger(v) && v > 0 && v < 10000);
+        return { proventos: g, descontos: d, liquido: liq, pessoas: pessoas === undefined ? null : pessoas };
+      }
+    }
+    return null;
+  }
+  const resumos = [];
+  let depsDoBloco = [];
+  for (let i = 0; i < linhas.length; i++) {
+    if (/^Código\s*\t/.test(linhas[i])) {
+      const d = (linhas[i + 1] || "").trim();
+      if (d && !/\d/.test(d) && depsDoBloco.indexOf(d) < 0) depsDoBloco.push(d);
+    }
+    if (/Resumo da folha/i.test(linhas[i])) {
+      let fim = i + 1;
+      while (fim < linhas.length && !/^Código\s*\t/.test(linhas[fim])) fim++;
+      const r = lerBloco(i, fim);
+      if (r) resumos.push({ departamentos: depsDoBloco, ...r });
+      else erros.push("Não consegui ler o resumo de " + (depsDoBloco.join(", ") || "um bloco"));
+      depsDoBloco = [];
     }
   }
+  const resumo = resumos.length
+    ? resumos.reduce((a, r) => ({
+        proventos: Math.round((a.proventos + r.proventos) * 100) / 100,
+        descontos: Math.round((a.descontos + r.descontos) * 100) / 100,
+        liquido: Math.round((a.liquido + r.liquido) * 100) / 100,
+        pessoas: a.pessoas === null || r.pessoas === null ? null : a.pessoas + r.pessoas,
+      }), { proventos: 0, descontos: 0, liquido: 0, pessoas: 0 })
+    : null;
   if (!resumo) erros.push("Não encontrei o resumo da folha no fim do PDF");
+  if (!empresa) erros.push("Não encontrei a empresa no cabeçalho");
+
+  /* cada bloco de resumo tem que fechar com os recibos dos departamentos dele */
+  resumos.forEach((r) => {
+    const gente = colaboradores.filter((c) => r.departamentos.indexOf(c.departamento) >= 0);
+    const p = gente.reduce((a, c) => a + ((c.totais && c.totais.proventos) || 0), 0);
+    const rot = r.departamentos.join(", ");
+    if (r.pessoas !== null && r.pessoas !== gente.length)
+      erros.push(`${rot}: li ${gente.length} colaboradores, mas o resumo diz ${r.pessoas}`);
+    else if (Math.abs(Math.round(p * 100) / 100 - r.proventos) > 0.005)
+      erros.push(`${rot}: proventos lidos (${p.toFixed(2)}) diferem do resumo (${r.proventos.toFixed(2)})`);
+  });
   if (!competencia) erros.push("Não encontrei a competência (linha Ref.: do cabeçalho)");
   if (!departamentoPdf) erros.push("Não encontrei o departamento no cabeçalho");
   if (!colaboradores.length) erros.push("Não encontrei nenhum colaborador — o arquivo é mesmo a folha de pagamento?");
@@ -220,7 +291,8 @@ function lerTexto(texto) {
       erros.push(`Total líquido lido (${r2(soma.liquido)}) diferente do resumo impresso (${resumo.liquido})`);
   }
 
-  return { competencia, departamentoPdf, colaboradores, resumo, conferencia, erros };
+  return { competencia, empresa, empresa_codigo: empresaCodigo, departamentoPdf, departamentos,
+           colaboradores, resumo, resumos, conferencia, erros };
 }
 
 async function lerFolhaPdf(buffer) {

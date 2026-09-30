@@ -4,8 +4,23 @@
 (function () {
   "use strict";
 
-  var DEP = "ADMINISTRATIVO";
   var LS = "folha-lube-";
+  /* Empresa e departamento: o hash da URL manda (#LUBE/IMPNOITE), depois o último
+     usado nesta máquina, depois o Administrativo da LUBE. */
+  var EMP = "LUBE", DEP = "ADMINISTRATIVO";
+  (function () {
+    var h = decodeURIComponent((location.hash || "").replace(/^#/, ""));
+    var m = h.split("/");
+    var salvo = null;
+    try { salvo = JSON.parse(localStorage.getItem(LS + "onde") || "null"); } catch (e) {}
+    if (m.length === 2 && m[0] && m[1]) { EMP = m[0]; DEP = m[1]; }
+    else if (salvo && salvo.emp && salvo.dep) { EMP = salvo.emp; DEP = salvo.dep; }
+  })();
+  var menuDeps = null; // empresas e departamentos com folha, vindos de /api/departamentos
+  var ROTULO_DEP = { ADMINISTRATIVO: "Administrativo", GERAL: "Folha geral", "VENDAS BALCAO": "Vendas balcão",
+    "VENDAS DISTRIBUICAO": "Vendas distribuição", OPERACIONAL: "Operacional", IMPACESSO: "Imp. acesso",
+    IMPADM: "Imp. administrativo", IMPDIA: "Imp. dia", IMPNOITE: "Imp. noite", "AFASTADOS INSS": "Afastados INSS" };
+  function rotuloDep(d) { return ROTULO_DEP[d] || d; }
   var dados = null;
   var abertoIdx = null;
   var editando = null;
@@ -47,7 +62,7 @@
 
   /* ------------------------------------------------ carga */
   function carregar() {
-    var url = "api/dados?dep=" + encodeURIComponent(DEP) +
+    var url = "api/dados?emp=" + encodeURIComponent(EMP) + "&dep=" + encodeURIComponent(DEP) +
       (competenciaEscolhida ? "&competencia=" + encodeURIComponent(competenciaEscolhida) : "");
     return fetch(url, { headers: { accept: "application/json" } })
       .then(function (r) {
@@ -62,11 +77,11 @@
 
   /* Quando uma gravação não chega ao banco, a marcação fica guardada aqui e a
      tela diz isso — melhor que sumir em silêncio e o mês fechar errado. */
-  function pendentes() { return ls("pendentes-" + DEP) || []; }
+  function pendentes() { return ls("pendentes-" + EMP + "-" + DEP) || []; }
   function guardarPendente(payload) {
     var fila = pendentes();
     fila.push({ quando: new Date().toISOString(), payload: payload });
-    ls("pendentes-" + DEP, fila);
+    ls("pendentes-" + EMP + "-" + DEP, fila);
     avisarPendencia();
   }
   function avisarPendencia() {
@@ -82,7 +97,7 @@
     return fetch("api/acao", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(Object.assign({ departamento: DEP, competencia: dados.competencia }, payload)),
+      body: JSON.stringify(Object.assign({ empresa: EMP, departamento: DEP, competencia: dados.competencia }, payload)),
     }).then(function (r) {
       if (!r.ok) throw new Error("HTTP " + r.status);
       return r.json();
@@ -115,7 +130,7 @@
     { tipo: "odonto_titular",    codigos: ["600"],        rotulo: "Assistência odontológica — titular" },
     { tipo: "odonto_dependente", codigos: ["647"],        rotulo: "Assistência odontológica — dependente" },
     { tipo: "saude_titular",     codigos: ["605"],        rotulo: "Assistência médica — titular" },
-    { tipo: "saude_dependente",  codigos: ["640", "646"], rotulo: "Assistência médica — dependente" },
+    { tipo: "saude_dependente",  codigos: ["640", "646", "662", "672"], rotulo: "Assistência médica — dependente" },
     { tipo: "vale",              codigos: ["665"],        rotulo: "Vale" },
   ];
   var COD_REF = {};
@@ -125,10 +140,13 @@
      está carregado, as outras filiais ficam de fora — cada uma entra aqui quando
      a folha dela chegar (LLOG, LUBE RJ, IMPERIO, SERMAR). */
   var ESCOPO = {
-    ADMINISTRATIVO: {
-      origens: ["LUBE-IMPERIO ODONTO", "LUBE-IMPERIO SAUDE", "UNIMED LUBE"],
-      setores: ["ADM", "ADMINISTRATIVO"],
-    },
+    /* a planilha LUBE-IMPÉRIO cobre as duas empresas; os vales de LUBE vêm por setor */
+    LUBE:    { origens: ["LUBE-IMPERIO ODONTO", "LUBE-IMPERIO SAUDE", "UNIMED LUBE"],
+               vales: ["ADMINISTRATIVO", "OPERACIONAL", "VENDAS"], principal: "ADMINISTRATIVO" },
+    IMPERIO: { origens: ["LUBE-IMPERIO ODONTO", "LUBE-IMPERIO SAUDE"], vales: [], principal: "GERAL" },
+    LLOG:    { origens: ["LLOG ODONTO", "LLOG SAUDE"], vales: ["OPERACIONAL L LOG"], principal: "GERAL" },
+    "LUBE RJ": { origens: [], vales: [], principal: "GERAL" },
+    SERMAR:  { origens: [], vales: [], principal: "GERAL" },
   };
 
   function temReferencia() { return !!(dados && dados.referencias && dados.referencias.length); }
@@ -143,44 +161,65 @@
      dois pedaços de nome valem como iguais se a diferença for de poucas letras. */
   function distancia(a, b) {
     if (a === b) return 0;
-    var ant = [], cur = [], i, j;
-    for (j = 0; j <= b.length; j++) ant[j] = j;
-    for (i = 1; i <= a.length; i++) {
-      cur[0] = i;
-      for (j = 1; j <= b.length; j++)
-        cur[j] = Math.min(ant[j] + 1, cur[j - 1] + 1, ant[j - 1] + (a.charAt(i - 1) === b.charAt(j - 1) ? 0 : 1));
-      for (j = 0; j <= b.length; j++) ant[j] = cur[j];
+    var m = a.length, n = b.length, d = [], i, j;
+    for (i = 0; i <= m; i++) { d[i] = [i]; }
+    for (j = 0; j <= n; j++) { d[0][j] = j; }
+    for (i = 1; i <= m; i++) {
+      for (j = 1; j <= n; j++) {
+        var custo = a.charAt(i - 1) === b.charAt(j - 1) ? 0 : 1;
+        d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + custo);
+        // letras trocadas de lugar (WESCLEY / WESCELY) contam como um erro só
+        if (i > 1 && j > 1 && a.charAt(i - 1) === b.charAt(j - 2) && a.charAt(i - 2) === b.charAt(j - 1))
+          d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+      }
     }
-    return ant[b.length];
+    return d[m][n];
   }
-  function mesmoPedaco(a, b) {
+  function mesmoPedaco(a, b, tolMax) {
     if (a === b) return true;
     var curto = a.length < b.length ? a : b, longo = a.length < b.length ? b : a;
-    if (curto.length >= 4 && longo.indexOf(curto) === 0) return true; // ANDREA / ANDREIA
-    var tol = curto.length >= 6 ? 2 : curto.length >= 4 ? 1 : 0;
+    if (curto.length >= 3 && longo.indexOf(curto) === 0 && longo.length - curto.length <= 2) return true; // ANDREA / ANDREIA, LUB / LUBE
+    var tol = curto.length >= 7 ? 3 : curto.length >= 6 ? 2 : curto.length >= 4 ? 1 : 0;
+    if (tolMax !== undefined) tol = Math.min(tol, tolMax);
     return Math.abs(a.length - b.length) <= tol && distancia(a, b) <= tol;
   }
-  /* Casa por pedaços do nome, exigindo o primeiro parecido e pelo menos dois em comum. */
+  /* Casa por pedaços do nome. O primeiro nome tem que bater e TODOS os pedaços do nome
+     mais curto têm que existir no mais longo — "Paulo Cesar de Souza" não é
+     "Paulo Cesar Barcelos" só porque os dois primeiros nomes coincidem. */
   function casarRef(nome, lista) {
     var a = pedacos(nome);
-    if (!a.length) return null;
+    if (a.length < 2) return null;
     var melhor = null, nota = 0, exato = false;
     lista.forEach(function (it) {
       var b = pedacos(it.nome);
-      if (!b.length || !mesmoPedaco(a[0], b[0])) return;
+      if (b.length < 2 || !mesmoPedaco(a[0], b[0], 1)) return; // primeiro nome: no maximo 1 letra
+      var curto = a.length <= b.length ? a : b, longo = a.length <= b.length ? b : a;
       var usados = {}, comuns = 0, iguais = 0;
-      a.forEach(function (pa) {
-        for (var i = 0; i < b.length; i++) {
+      curto.forEach(function (pc) {
+        for (var i = 0; i < longo.length; i++) {
           if (usados[i]) continue;
-          if (mesmoPedaco(pa, b[i])) { usados[i] = 1; comuns++; if (pa === b[i]) iguais++; return; }
+          if (mesmoPedaco(pc, longo[i])) { usados[i] = 1; comuns++; if (pc === longo[i]) iguais++; return; }
         }
       });
-      var n = comuns / Math.max(a.length, b.length);
-      if (comuns >= 2 && n > nota) {
-        nota = n; melhor = it; exato = iguais === a.length && a.length === b.length;
-      }
+      if (comuns < curto.length) return; // sobrou pedaço do nome curto sem par: não é a mesma pessoa
+      var n = comuns / longo.length;
+      if (n > nota) { nota = n; melhor = it; exato = iguais === a.length && a.length === b.length; }
     });
     return melhor ? { item: melhor, nota: nota, exato: exato } : null;
+  }
+
+  /* INSS e IRRF: a regra mora em encargos.js, a mesma da API. */
+  function encargos(p) {
+    if (!window.Encargos) return null;
+    return window.Encargos.conferirEncargos(p, dados.competencia);
+  }
+  function problemasEncargos(p) {
+    var e = encargos(p);
+    if (!e) return [];
+    var lista = [];
+    if (e.inss.situacao === "diverge") lista.push("INSS");
+    if (e.irrf.situacao === "diverge") lista.push("IRRF");
+    return lista;
   }
 
   function somaCodigos(p, codigos) {
@@ -239,18 +278,17 @@
      das outras filiais não entram, é aqui que essas pessoas ficam — com status a conferir. */
   function pendenciasReferencia() {
     if (!temReferencia()) return [];
-    var escopo = ESCOPO[DEP];
-    if (!escopo) return [];
+    var escopo = ESCOPO[EMP];
+    if (!escopo || escopo.principal !== DEP) return [];
     var noEscopo = dados.referencias.filter(function (r) {
-      var setor = String(r.setor || "").toUpperCase();
-      if (escopo.setores.indexOf(setor) < 0) return false;
-      return r.tipo === "vale" || escopo.origens.indexOf(r.origem) >= 0;
+      if (r.tipo === "vale") return escopo.vales.indexOf(String(r.setor || "").toUpperCase()) >= 0;
+      return escopo.origens.indexOf(r.origem) >= 0;
     });
+    /* quem tem folha em qualquer empresa neste mês — a planilha LUBE-IMPÉRIO mistura as duas */
+    var todos = (dados.nomes_todas || []).map(function (n) { return n.nome; });
+    if (!todos.length) todos = dados.colaboradores.map(function (p) { return p.nome; });
     var sobrando = noEscopo.filter(function (r) {
-      return !dados.colaboradores.some(function (p) {
-        var m = casarRef(p.nome, [r]);
-        return !!m;
-      });
+      return !todos.some(function (nome) { return !!casarRef(nome, [r]); });
     });
     var grupos = [];
     sobrando.forEach(function (r) {
@@ -296,7 +334,7 @@
     if (!p.anterior) return "novo";
     if (Number(p.salario_contratual) !== Number(p.anterior.salario_contratual) || p.funcao !== p.anterior.funcao)
       return "alerta";
-    var revisar = problemasConferencia(p).length > 0;
+    var revisar = problemasConferencia(p).length > 0 || problemasEncargos(p).length > 0;
     parear(p.anterior.rubricas, p.rubricas).forEach(function (l) {
       if (VARIAVEL[l.codigo]) return;
       if (temReferencia() && COD_REF[l.codigo]) return;
@@ -446,10 +484,14 @@
     }, 120);
 
     document.getElementById("panel-titulo").textContent =
-      "Administração — " + dados.colaboradores.length + " colaboradores";
+      rotuloDep(DEP) + " — " + dados.colaboradores.length + " colaborador" + (dados.colaboradores.length === 1 ? "" : "es");
     document.getElementById("panel-sub").textContent =
-      "Competência " + mesAno(dados.competencia) + " comparada com " + mesAno(dados.competencia_anterior) +
-      " · Lube Distribuidora Ltda · CNPJ 03.447.509/0001-75";
+      "Competência " + mesAno(dados.competencia) +
+      (dados.competencia_anterior ? " comparada com " + mesAno(dados.competencia_anterior) : " — primeira competência carregada") +
+      " · " + (dados.razao_social || EMP);
+    var eyebrow = document.getElementById("eyebrow-dep");
+    if (eyebrow) eyebrow.textContent = "Folha de pagamento · " + EMP + " · " + rotuloDep(DEP);
+    document.title = "Validação de Folha — " + EMP + " · " + rotuloDep(DEP);
 
     document.getElementById("rodape").innerHTML =
       "Dados lidos do banco em <b>" + new Date(dados.gerado_em).toLocaleString("pt-BR") +
@@ -645,7 +687,26 @@
 
   /* Bases e encargos ficam fora da tabela de rubricas, em bloco próprio:
      é contra eles que se confere se o INSS, o FGTS e o IRRF descontados fecham. */
+  /* INSS e IRRF: o que a folha descontou contra o que a tabela do ano manda.
+     Errado fica em vermelho, com o valor devido embaixo; férias à parte vira aviso. */
+  function celEncargo(rot, e) {
+    if (!e) return "";
+    var st = e.situacao, cls = "flat", txt, destaque = false;
+    if (st === "confere") txt = "confere com a tabela de " + String(dados.competencia).slice(0, 4);
+    else if (st === "diverge") { txt = "▲ tabela: " + num(e.devido); cls = "erro"; destaque = true; }
+    else if (st === "acima_da_base") { txt = "INSS junto com férias — não conferível pela folha"; cls = "up"; }
+    else if (st === "nao_conferivel") { txt = "férias no mês — não conferível pela folha"; cls = "up"; }
+    else if (st === "sem_base") txt = "sem base no mês";
+    else txt = "—";
+    return '<div class="bases-cell' + (destaque ? " destaque erro" : "") + '">' +
+      '<div class="k">' + rot + "</div>" +
+      '<div class="linha"><span class="mes">folha</span><span class="v' + (destaque ? " v-erro" : "") + '">' + num(e.folha) + "</span></div>" +
+      '<div class="linha"><span class="mes">devido</span><span class="v old">' + (e.devido === undefined ? "—" : num(e.devido)) + "</span></div>" +
+      '<div class="d ' + cls + '">' + txt + "</div></div>";
+  }
+
   function blocoBases(p) {
+    var enc = encargos(p);
     var ba = (p.anterior && p.anterior.bases) || {};
     var bs = p.bases || {};
     var mesA = mesAno(dados.competencia_anterior);
@@ -677,12 +738,8 @@
         cell("Base IRRF", ba.irrf, bs.irrf, true) +
         cell("Base FGTS", ba.fgts, bs.fgts) +
         cell("FGTS do mês", ba.fgts_valor, bs.fgts_valor) +
-        '<div class="bases-cell"><div class="k">Confere com o recibo</div>' +
-          '<div class="linha"><span class="mes">INSS descontado</span><span class="v">' +
-            num(somaRubrica(p, "903")) + "</span></div>" +
-          '<div class="linha"><span class="mes">IRRF descontado</span><span class="v">' +
-            num(somaRubrica(p, "914")) + "</span></div>" +
-          '<div class="d flat">linhas 903 e 914 da folha</div></div>' +
+        celEncargo("INSS descontado", enc && enc.inss) +
+        celEncargo("IRRF retido", enc && enc.irrf) +
       "</div></div>";
   }
 
@@ -729,6 +786,33 @@
           " — diferença de <b>" + brl(Math.abs(sbS - sbA)) + "</b>." +
           (evento ? " O evento do mês explica: " + esc(evento) : " <b>Não há férias, atestado nem admissão no mês que justifique.</b>"),
       });
+    }
+
+    /* INSS e IRRF contra as tabelas oficiais do ano (encargos.js) */
+    var enc = encargos(p);
+    if (enc) {
+      var i = enc.inss, r = enc.irrf;
+      if (i.situacao === "diverge") {
+        lista.push({ nivel: "grave", titulo: "INSS diferente da tabela",
+          detalhe: "Sobre a base de <b>" + brl(i.base) + "</b> a tabela de " + enc.ano + " dá <b>" + brl(i.devido) +
+            "</b>; a folha descontou <b>" + brl(i.folha) + "</b> (" + (i.diferenca > 0 ? "a mais" : "a menos") +
+            " <b>" + brl(Math.abs(i.diferenca)) + "</b>)." });
+      } else if (i.situacao === "acima_da_base") {
+        lista.push({ nivel: "info", titulo: "INSS calculado junto com as férias",
+          detalhe: "A base impressa (<b>" + brl(i.base) + "</b>) daria <b>" + brl(i.devido) + "</b>, e a folha descontou <b>" +
+            brl(i.folha) + "</b> — o que corresponde a uma base de <b>" + brl(i.base_implicita) +
+            "</b>. É o INSS do mês somado ao das férias pagas em recibo à parte; não dá para conferir só pela folha." });
+      }
+      if (r.situacao === "diverge") {
+        lista.push({ nivel: "grave", titulo: "IRRF diferente da tabela",
+          detalhe: "Rendimento tributável de <b>" + brl(r.rendimento) + "</b>, dedução " + r.deducao + " (base <b>" + brl(r.base) +
+            "</b>), tabela de " + enc.ano + " menos a redução de <b>" + brl(r.reducao) + "</b>: devido <b>" + brl(r.devido) +
+            "</b>. A folha reteve <b>" + brl(r.folha) + "</b>" +
+            (r.base_impressa_diverge !== undefined
+              ? " — a base impressa no recibo (<b>" + brl(r.base_impressa) + "</b>) está <b>" + brl(Math.abs(r.base_impressa_diverge)) +
+                "</b> " + (r.base_impressa_diverge > 0 ? "acima" : "abaixo") + " do que o recibo sustenta."
+              : ".") });
+      }
     }
 
     /* planilhas das operadoras e lista de vales: o desconto tem que bater com o que
@@ -837,11 +921,13 @@
 
     function evento(texto, quando) {
       if (!texto) return;
-      if (/atestado/i.test(texto)) motivos.push("Atestado");
-      else if (/férias|ferias/i.test(texto)) motivos.push("Férias");
-      else if (/admitid|admiss/i.test(texto)) motivos.push("Admissão");
-      else if (/afastament/i.test(texto)) motivos.push("Afastamento");
+      var m;
+      if (/atestado/i.test(texto)) m = "Atestado";
+      else if (/férias|ferias/i.test(texto)) m = "Férias";
+      else if (/admitid|admiss/i.test(texto)) m = "Admissão";
+      else if (/afastament/i.test(texto)) m = "Afastamento";
       else return;
+      if (motivos.indexOf(m) < 0) motivos.push(m);
       detalhes.push(quando + ": " + texto);
     }
     evento(p.evento, mesAno(dados.competencia).split("/")[0]);
@@ -877,7 +963,14 @@
         ? "Vale" : "Desconto");
       probs.forEach(function (i) { detalhes.push(tituloConferencia(i)); });
     }
-    if (!probs.length && statusBase(p) === "revisar") {
+    var encs = problemasEncargos(p);
+    if (encs.length) {
+      motivos = motivos.concat(encs);
+      var e2 = encargos(p);
+      if (e2 && e2.inss.situacao === "diverge") detalhes.push("INSS: folha " + num(e2.inss.folha) + " x tabela " + num(e2.inss.devido));
+      if (e2 && e2.irrf.situacao === "diverge") detalhes.push("IRRF: folha " + num(e2.irrf.folha) + " x tabela " + num(e2.irrf.devido));
+    }
+    if (!probs.length && !encs.length && statusBase(p) === "revisar") {
       motivos.push("Benefício");
       detalhes.push("Benefício descontado fora do valor da tabela");
     }
@@ -885,7 +978,7 @@
     if (!motivos.length) return null;
 
     /* a cor segue o motivo mais grave: contrato e desconto errado são alerta, o resto é atenção */
-    var tipo = contrato.length || probs.length ? "contrato" : "evento";
+    var tipo = contrato.length || probs.length || encs.length ? "contrato" : "evento";
     var texto = motivos.length === 1
       ? motivos[0]
       : motivos.slice(0, -1).join(", ") + " e " + motivos[motivos.length - 1];
@@ -1199,8 +1292,13 @@
         '<div class="mini" style="margin-bottom:16px;">' +
           '<div class="card"><div class="k">Competência</div><div class="v">' + esc(pv.competencia_rotulo) + "</div>" +
             '<div class="d">vira o mês atual do painel</div></div>' +
-          '<div class="card"><div class="k">Departamento</div><div class="v" style="font-size:15px;">' + esc(pv.departamento) + "</div>" +
-            '<div class="d">no PDF: ' + esc(pv.departamento_pdf || "—") + "</div></div>" +
+          '<div class="card"><div class="k">Empresa</div><div class="v" style="font-size:15px;">' + esc(pv.empresa || "?") + "</div>" +
+            '<div class="d">' + esc(pv.empresa_pdf || "—") + "</div></div>" +
+          '<div class="card"><div class="k">Departamento' + ((pv.departamentos || []).length > 1 ? "s" : "") + '</div>' +
+            '<div class="v" style="font-size:15px;">' + ((pv.departamentos || []).length > 1
+              ? pv.departamentos.length + " no arquivo"
+              : esc(pv.departamento)) + "</div>" +
+            '<div class="d">' + esc((pv.departamentos || []).map(function (d) { return rotuloDep(d.departamento) + " (" + d.colaboradores + ")"; }).join(" · ") || pv.departamento_pdf || "—") + "</div></div>" +
           '<div class="card"><div class="k">Colaboradores</div><div class="v">' + pv.colaboradores + "</div>" +
             '<div class="d">' + pv.rubricas + " rubricas lidas</div></div>" +
         "</div>" +
@@ -1292,7 +1390,7 @@
     return fetch("api/importar", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ arquivo: imp.base64, modo: modo, departamento: imp.previa ? imp.previa.departamento : null }),
+      body: JSON.stringify({ arquivo: imp.base64, modo: modo }),
     })
       .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
       .then(function (res) {
@@ -1314,7 +1412,9 @@
     enviarImportacao("gravar").then(function () {
       if (imp.previa && imp.previa.gravado) {
         competenciaEscolhida = null;
+        if (imp.previa.empresa && imp.previa.departamento) irPara(imp.previa.empresa, imp.previa.departamento, true);
         fecharImportar();
+        carregarMenu();
         document.getElementById("rows").innerHTML = '<div class="carregando">Carregando a folha…</div>';
         carregar().then(render);
       }
@@ -1345,6 +1445,55 @@
   document.getElementById("menu-btn").addEventListener("click", function () { side.classList.toggle("aberto"); });
   document.getElementById("veu").addEventListener("click", function () { side.classList.remove("aberto"); });
 
+  /* Menu lateral: uma seção por empresa, um item por departamento com folha carregada.
+     Mostra só o que existe. */
+  function pintarMenu() {
+    var alvo = document.getElementById("menu-deps");
+    if (!alvo || !menuDeps) return;
+    alvo.innerHTML = menuDeps.map(function (e) {
+      return '<div class="side-grupo side-emp">' + esc(e.empresa) + "</div>" +
+        e.departamentos.map(function (d) {
+          var ativo = e.empresa === EMP && d.departamento === DEP;
+          return '<button class="side-item side-sub' + (ativo ? " ativo" : "") + '" data-emp="' + esc(e.empresa) +
+            '" data-dep="' + esc(d.departamento) + '" title="' + esc(e.razao_social) + '">' +
+            '<span class="ic">' + (ativo ? "●" : "○") + "</span>" + esc(rotuloDep(d.departamento)) +
+            '<span class="qtd mono">' + d.pessoas + "</span></button>";
+        }).join("");
+    }).join("");
+  }
+  function carregarMenu() {
+    return fetch("api/departamentos", { headers: { accept: "application/json" } })
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .then(function (lista) { menuDeps = Array.isArray(lista) ? lista : []; pintarMenu(); })
+      .catch(function () { menuDeps = []; });
+  }
+  function irPara(emp, dep, semRecarregar) {
+    EMP = emp; DEP = dep; competenciaEscolhida = null; abertoIdx = null;
+    try { localStorage.setItem(LS + "onde", JSON.stringify({ emp: emp, dep: dep })); } catch (e) {}
+    location.hash = encodeURIComponent(emp) + "/" + encodeURIComponent(dep);
+    pintarMenu();
+    if (semRecarregar) return;
+    document.getElementById("modal-root").innerHTML = "";
+    document.getElementById("rows").innerHTML = '<div class="carregando">Carregando a folha…</div>';
+    document.getElementById("fora-folha").innerHTML = "";
+    carregar().then(render).catch(function (e) {
+      document.getElementById("rows").innerHTML =
+        '<div class="carregando">Não consegui ler a folha no banco.<br><br><b>' + esc(e.message) + "</b></div>";
+    });
+    side.classList.remove("aberto");
+  }
+  document.getElementById("menu-deps").addEventListener("click", function (e) {
+    var b = e.target.closest ? e.target.closest("[data-emp]") : null;
+    if (!b) return;
+    if (b.getAttribute("data-emp") === EMP && b.getAttribute("data-dep") === DEP) return;
+    irPara(b.getAttribute("data-emp"), b.getAttribute("data-dep"));
+  });
+  window.addEventListener("hashchange", function () {
+    var m = decodeURIComponent((location.hash || "").replace(/^#/, "")).split("/");
+    if (m.length === 2 && (m[0] !== EMP || m[1] !== DEP)) irPara(m[0], m[1]);
+  });
+
+  carregarMenu();
   carregar().then(render).catch(function (e) {
     document.getElementById("rows").innerHTML =
       '<div class="carregando">Não consegui ler a folha no banco.<br><br>' +

@@ -36,10 +36,24 @@ departamento, se o que foi pago no mês anterior continua sendo pago no mês atu
    - **desconto sem respaldo** em nenhuma planilha, inclusive **vale sem justificativa**;
    - **nome escrito diferente** na planilha → só uma nota, quando o valor bate.
    Todo achado vira observação automática na ficha da pessoa e etiqueta na lista.
-4.2. **Cobrança sem folha.** Quem a planilha cobra no setor desta folha e não aparece nela fica num
-   bloco próprio embaixo da lista, com status *Conferir* — ou a pessoa está na folha de outra filial
-   que ainda não foi importada, ou a cobrança está indevida. Resolve-se sozinho quando a folha dela
-   entrar. O recorte de cada departamento está em `ESCOPO`, no `web/app.js`.
+4.2. **Cobrança sem folha.** Quem a planilha cobra e não aparece em **nenhuma folha do mês, de
+   nenhuma empresa** fica num bloco próprio embaixo da lista do departamento principal da empresa
+   (Administrativo na LUBE, Folha geral nas outras), com status *Conferir*. Ou a cobrança está
+   indevida, ou a pessoa é de uma entidade que não tem folha aqui. Que planilhas pertencem a cada
+   empresa está em `ESCOPO`, no `web/app.js`.
+4.3. **Nome de planilha é comparado por pedaços.** O primeiro nome tem que bater (no máximo uma
+   letra de diferença, ou prefixo) e **todos os pedaços do nome mais curto** têm que existir no mais
+   longo, aceitando erro de digitação e letras trocadas (*WESCLEY / WESCELY*). Foi preciso apertar a
+   regra: "Paulo Cesar de Souza" não é "Paulo Cesar Barcelos" só porque os dois primeiros nomes
+   coincidem.
+4.4. **INSS e IRRF conferidos contra as tabelas oficiais do ano** (`web/encargos.js`, a mesma regra
+   na API e no navegador). INSS: progressivo por faixa, truncando cada faixa nos centavos como a
+   contabilidade faz. IRRF: rendimento tributável do recibo (sem ajuda de custo, salário-família,
+   estorno de provisão e a contrapartida de afastado), dedução legal ou simplificada — a mais
+   favorável —, tabela mensal e a **redução da Lei 15.270/2025** (zera até R$ 5.000 e cai até
+   R$ 7.350). Errado fica em vermelho no bloco *Bases e encargos*, com o valor devido embaixo, e vira
+   observação. Quem teve férias pagas em recibo à parte tem o INSS do mês calculado sobre a soma:
+   o painel diz que não dá para conferir só pela folha, em vez de acusar erro.
 4.5. **A variação da lista é a do salário base** (rubrica 001), não a do líquido: vale, adiantamento
    e parcela de empréstimo mexem no total pago todo mês sem que nada no contrato tenha mudado.
 5. Clicar em qualquer pessoa abre o **comparativo completo**: todas as rubricas lado a lado,
@@ -174,7 +188,20 @@ Hoje a folha entra por carga a partir do JSON em `dados/`. O passo seguinte é u
 o PDF do DP direto e grave nas mesmas tabelas — a estrutura já está pronta para receber qualquer
 competência e qualquer departamento (Administrativo, Logística, Transporte).
 
-Faltam as folhas das outras filiais (LUBE RJ, LLOG, IMPÉRIO, SERMAR). Quando entrarem, basta
-acrescentar o departamento em `ESCOPO` (`web/app.js`) com as origens e os setores que pertencem a
-ele — o cruzamento com a referência já está pronto e as cobranças hoje penduradas em
-*Cobrado na planilha e sem folha* caem sozinhas no lugar.
+## Cinco empresas, um painel (2026-09-30)
+
+A folha deixou de ser só da LUBE. Entraram **LUBE RJ, L LOG, IMPÉRIO LOG e SERMAR**, agosto e
+setembro/2026: 405 recibos, 2.654 rubricas, 13 pares empresa/departamento. A matrícula se repete
+entre empresas, então `empresa` entrou em toda chave (`web/db/04-empresa.sql`) — a coluna nasceu com
+default `LUBE` e nada do que já existia mudou. O menu lateral é montado por
+`financeiro.painel_departamentos()`: mostra só o que tem folha carregada.
+
+O leitor de PDF precisou de três coisas para as outras filiais: uma lista explícita de proventos
+(hora extra, adicional noturno, comissão, prêmio, salário-família — o PDF não traz a coluna P/D),
+a empresa lida do cabeçalho, e **um resumo por departamento**: a folha da LUBE traz nove
+departamentos no mesmo arquivo, cada um com seu resumo impresso, e cada bloco tem que fechar com
+os recibos dele. Regra confirmada nas dez folhas: todos os 405 recibos fecham, e o Administrativo
+de setembro saiu byte a byte igual ao que já estava no banco.
+
+A carga das dez folhas foi feita pelo MCP do Supabase em blocos, com o SQL gerado pela mesma regra
+do importador — a máquina não tem a senha do banco. Daqui em diante entra pelo painel.

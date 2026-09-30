@@ -90,6 +90,16 @@ button,input,select{font-family:inherit;font-weight:500;}
   color:#fff;border-color:var(--brand-blue-lt);box-shadow:0 12px 28px -18px var(--brand-blue-lt);
 }
 .side-item.ativo .ic{background:rgba(255,255,255,.18);color:#fff;}
+/* empresas e departamentos com folha carregada — o menu mostra só o que existe */
+.side-emp{margin-top:14px;color:var(--txt-2);}
+.side-item.side-sub{font-size:12.5px;padding:7px 10px 7px 12px;margin:1px 0;}
+.side-item.side-sub .ic{width:18px;height:18px;font-size:9px;background:transparent;color:var(--txt-3);}
+.side-item.side-sub.ativo .ic{color:#fff;}
+.side-item.side-sub .qtd{margin-left:auto;font-size:10.5px;color:var(--txt-3);font-weight:700;}
+.side-item.side-sub.ativo .qtd{color:rgba(255,255,255,.8);}
+.bases-cell.erro{border-color:var(--red-line);background:rgba(229,32,44,.08);}
+.bases-cell .v.v-erro{color:var(--brand-red-lt);}
+.bases-cell .d.erro{color:var(--brand-red-lt);font-weight:700;}
 .menu-btn{
   display:none;position:fixed;left:14px;top:14px;z-index:32;width:42px;height:42px;border-radius:11px;
   background:var(--surface-2);border:1px solid var(--line-2);color:var(--txt-1);cursor:pointer;
@@ -621,10 +631,11 @@ button,input,select{font-family:inherit;font-weight:500;}
   </div>
 
   <div class="side-grupo">Folha de pagamento</div>
-  <button class="side-item ativo">
+  <button class="side-item ativo" id="side-modulo">
     <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span>
     Validação de Folha
   </button>
+  <div id="menu-deps"></div>
 </nav>
 <div class="veu" id="veu"></div>
 
@@ -632,7 +643,7 @@ button,input,select{font-family:inherit;font-weight:500;}
   <div class="wrap">
     <div class="topbar rise">
       <div>
-        <div class="eyebrow">Folha de pagamento · Administrativo</div>
+        <div class="eyebrow" id="eyebrow-dep">Folha de pagamento</div>
         <h1>Validação de Folha</h1>
       </div>
       <div class="topbar-right">
@@ -724,6 +735,7 @@ button,input,select{font-family:inherit;font-weight:500;}
 
 <div id="modal-root"></div>
 
+<script src="encargos.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
