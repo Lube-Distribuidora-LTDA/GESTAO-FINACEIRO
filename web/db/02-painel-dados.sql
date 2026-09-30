@@ -51,6 +51,15 @@ select jsonb_build_object(
  'gerado_em', now(),
  'beneficios', coalesce((select jsonb_agg(jsonb_build_object('codigo',codigo,'descricao',descricao,'tipo',tipo,'valor',valor) order by codigo)
                           from beneficio_referencia),'[]'::jsonb),
+ -- Referência por pessoa (planilhas das operadoras + lista de vales). Sem a competência
+ -- exata, usa a última carregada antes dela: a cobrança do plano muda pouco de um mês
+ -- para o outro, e conferir contra a referência velha é melhor que não conferir nada.
+ 'referencia_competencia', (select max(competencia) from referencia_desconto where competencia <= (select atual from a)),
+ 'referencias', coalesce((select jsonb_agg(jsonb_build_object('tipo',tipo,'nome',nome,'nome_busca',nome_busca,
+                                   'valor',valor,'origem',origem,'setor',setor_origem) order by tipo, nome_busca)
+                          from referencia_desconto
+                          where competencia = (select max(competencia) from referencia_desconto
+                                                where competencia <= (select atual from a))),'[]'::jsonb),
  'resumo', (select jsonb_build_object(
       'pessoas', count(*) filter (where competencia=(select atual from a)),
       'proventos', sum(total_proventos) filter (where competencia=(select atual from a)),

@@ -107,6 +107,164 @@
     return { ok: false, txt: "fora da tabela", alerta: true };
   }
 
+  /* ------------------------------------- conferência do desconto por pessoa
+     Uma tabela única de benefício não serve para conferir plano: cada um paga o
+     seu, conforme os dependentes. A referência de verdade são as planilhas das
+     operadoras e a lista de vales do mês, em financeiro.referencia_desconto. */
+  var TIPOS_REF = [
+    { tipo: "odonto_titular",    codigos: ["600"],        rotulo: "Assistência odontológica — titular" },
+    { tipo: "odonto_dependente", codigos: ["647"],        rotulo: "Assistência odontológica — dependente" },
+    { tipo: "saude_titular",     codigos: ["605"],        rotulo: "Assistência médica — titular" },
+    { tipo: "saude_dependente",  codigos: ["640", "646"], rotulo: "Assistência médica — dependente" },
+    { tipo: "vale",              codigos: ["665"],        rotulo: "Vale" },
+  ];
+  var COD_REF = {};
+  TIPOS_REF.forEach(function (t) { t.codigos.forEach(function (c) { COD_REF[c] = t; }); });
+
+  /* Que pedaço da referência pertence a esta folha. Enquanto só o Administrativo
+     está carregado, as outras filiais ficam de fora — cada uma entra aqui quando
+     a folha dela chegar (LLOG, LUBE RJ, IMPERIO, SERMAR). */
+  var ESCOPO = {
+    ADMINISTRATIVO: {
+      origens: ["LUBE-IMPERIO ODONTO", "LUBE-IMPERIO SAUDE", "UNIMED LUBE"],
+      setores: ["ADM", "ADMINISTRATIVO"],
+    },
+  };
+
+  function temReferencia() { return !!(dados && dados.referencias && dados.referencias.length); }
+
+  var PARTICULA = { DE: 1, DA: 1, DO: 1, DAS: 1, DOS: 1, E: 1 };
+  function pedacos(nome) {
+    return String(nome || "").normalize("NFD").replace(/[̀-ͯ]/g, "")
+      .toUpperCase().replace(/[^A-Z ]/g, " ").split(/\s+/)
+      .filter(function (p) { return p.length > 1 && !PARTICULA[p]; });
+  }
+  /* A planilha erra letra ("Keli Sfalsin Gatti" vira "KELI STANFIN GAATI"), então
+     dois pedaços de nome valem como iguais se a diferença for de poucas letras. */
+  function distancia(a, b) {
+    if (a === b) return 0;
+    var ant = [], cur = [], i, j;
+    for (j = 0; j <= b.length; j++) ant[j] = j;
+    for (i = 1; i <= a.length; i++) {
+      cur[0] = i;
+      for (j = 1; j <= b.length; j++)
+        cur[j] = Math.min(ant[j] + 1, cur[j - 1] + 1, ant[j - 1] + (a.charAt(i - 1) === b.charAt(j - 1) ? 0 : 1));
+      for (j = 0; j <= b.length; j++) ant[j] = cur[j];
+    }
+    return ant[b.length];
+  }
+  function mesmoPedaco(a, b) {
+    if (a === b) return true;
+    var curto = a.length < b.length ? a : b, longo = a.length < b.length ? b : a;
+    if (curto.length >= 4 && longo.indexOf(curto) === 0) return true; // ANDREA / ANDREIA
+    var tol = curto.length >= 6 ? 2 : curto.length >= 4 ? 1 : 0;
+    return Math.abs(a.length - b.length) <= tol && distancia(a, b) <= tol;
+  }
+  /* Casa por pedaços do nome, exigindo o primeiro parecido e pelo menos dois em comum. */
+  function casarRef(nome, lista) {
+    var a = pedacos(nome);
+    if (!a.length) return null;
+    var melhor = null, nota = 0, exato = false;
+    lista.forEach(function (it) {
+      var b = pedacos(it.nome);
+      if (!b.length || !mesmoPedaco(a[0], b[0])) return;
+      var usados = {}, comuns = 0, iguais = 0;
+      a.forEach(function (pa) {
+        for (var i = 0; i < b.length; i++) {
+          if (usados[i]) continue;
+          if (mesmoPedaco(pa, b[i])) { usados[i] = 1; comuns++; if (pa === b[i]) iguais++; return; }
+        }
+      });
+      var n = comuns / Math.max(a.length, b.length);
+      if (comuns >= 2 && n > nota) {
+        nota = n; melhor = it; exato = iguais === a.length && a.length === b.length;
+      }
+    });
+    return melhor ? { item: melhor, nota: nota, exato: exato } : null;
+  }
+
+  function somaCodigos(p, codigos) {
+    var total = 0, achou = false;
+    (p.rubricas || []).forEach(function (r) {
+      if (codigos.indexOf(r.codigo) >= 0) { total += valorEfetivo(p, r); achou = true; }
+    });
+    return achou ? Math.round(total * 100) / 100 : null;
+  }
+
+  /* Uma linha por tipo de desconto: o que a folha descontou, o que a planilha manda
+     descontar, e o que fazer com a diferença. */
+  function conferencia(p) {
+    if (!temReferencia()) return [];
+    return TIPOS_REF.map(function (T) {
+      var lista = dados.referencias.filter(function (r) { return r.tipo === T.tipo; });
+      var m = casarRef(p.nome, lista);
+      var folha = somaCodigos(p, T.codigos);
+      var ref = m ? Number(m.item.valor) : null;
+      var it = {
+        tipo: T.tipo, rotulo: T.rotulo, codigos: T.codigos, folha: folha, referencia: ref,
+        nomeRef: m ? m.item.nome : null, origem: m ? m.item.origem : null,
+        nomeDiferente: !!(m && !m.exato),
+      };
+      if (folha === null && ref === null) it.situacao = "nada";
+      else if (folha === null) it.situacao = "faltando";
+      else if (ref === null) it.situacao = "sem_referencia";
+      else if (Math.abs(folha - ref) < 0.005) it.situacao = "confere";
+      else it.situacao = "diverge";
+      return it;
+    }).filter(function (i) { return i.situacao !== "nada"; });
+  }
+  function problemasConferencia(p) {
+    return conferencia(p).filter(function (i) { return i.situacao !== "confere"; });
+  }
+  function conferenciaDoCodigo(p, codigo) {
+    if (!COD_REF[codigo]) return null;
+    var tipo = COD_REF[codigo].tipo;
+    return conferencia(p).filter(function (i) { return i.tipo === tipo; })[0] || null;
+  }
+
+  /* Texto de apoio da etiqueta: diz de qual planilha veio e com que nome. */
+  function tituloConferencia(cf) {
+    if (!cf) return "";
+    var base = cf.rotulo + " · ";
+    if (cf.situacao === "sem_referencia")
+      return base + "descontado " + num(cf.folha) + " e não há esta cobrança em nenhuma planilha do mês";
+    var onde = (cf.origem || "planilha") + (cf.nomeDiferente ? ' — lá o nome está "' + cf.nomeRef + '"' : "");
+    if (cf.situacao === "faltando") return base + "a planilha cobra " + num(cf.referencia) + " (" + onde + ")";
+    if (cf.situacao === "diverge")
+      return base + "folha " + num(cf.folha) + " x planilha " + num(cf.referencia) + " (" + onde + ")";
+    return base + "bate com " + onde;
+  }
+
+  /* Quem a planilha cobra no setor desta folha e não aparece nela. Enquanto as folhas
+     das outras filiais não entram, é aqui que essas pessoas ficam — com status a conferir. */
+  function pendenciasReferencia() {
+    if (!temReferencia()) return [];
+    var escopo = ESCOPO[DEP];
+    if (!escopo) return [];
+    var noEscopo = dados.referencias.filter(function (r) {
+      var setor = String(r.setor || "").toUpperCase();
+      if (escopo.setores.indexOf(setor) < 0) return false;
+      return r.tipo === "vale" || escopo.origens.indexOf(r.origem) >= 0;
+    });
+    var sobrando = noEscopo.filter(function (r) {
+      return !dados.colaboradores.some(function (p) {
+        var m = casarRef(p.nome, [r]);
+        return !!m;
+      });
+    });
+    var grupos = [];
+    sobrando.forEach(function (r) {
+      var g = grupos.filter(function (x) { return !!casarRef(x.nome, [r]); })[0];
+      if (!g) { g = { nome: r.nome, itens: [], total: 0 }; grupos.push(g); }
+      if (pedacos(r.nome).length > pedacos(g.nome).length) g.nome = r.nome; // fica o nome mais completo
+      var T = TIPOS_REF.filter(function (t) { return t.tipo === r.tipo; })[0];
+      g.itens.push({ rotulo: T ? T.rotulo : r.tipo, valor: Number(r.valor), origem: r.origem });
+      g.total += Number(r.valor);
+    });
+    grupos.forEach(function (g) { g.total = Math.round(g.total * 100) / 100; });
+    return grupos;
+  }
+
   function chaveRub(r) {
     if (r.codigo === "667") {
       var m = String(r.referencia || "").match(/\/\s*(\d+)/);
@@ -138,9 +296,10 @@
     if (!p.anterior) return "novo";
     if (Number(p.salario_contratual) !== Number(p.anterior.salario_contratual) || p.funcao !== p.anterior.funcao)
       return "alerta";
-    var revisar = false;
+    var revisar = problemasConferencia(p).length > 0;
     parear(p.anterior.rubricas, p.rubricas).forEach(function (l) {
       if (VARIAVEL[l.codigo]) return;
+      if (temReferencia() && COD_REF[l.codigo]) return;
       var va = l.ago ? Number(l.ago.valor) : null;
       var vs = l.set ? Number(l.set.valor) : null;
       if (va === vs) return;
@@ -294,10 +453,40 @@
 
     document.getElementById("rodape").innerHTML =
       "Dados lidos do banco em <b>" + new Date(dados.gerado_em).toLocaleString("pt-BR") +
-      "</b> · schema <b>financeiro</b> do DATA WAREHOUSE.";
+      "</b> · schema <b>financeiro</b> do DATA WAREHOUSE." +
+      (temReferencia()
+        ? " Descontos conferidos contra as planilhas das operadoras e a lista de vales de <b>" +
+          mesAno(dados.referencia_competencia) + "</b> — " + dados.referencias.length + " cobranças."
+        : "");
 
     document.getElementById("aviso").innerHTML = "";
     avisarPendencia();
+    pintarForaDaFolha();
+  }
+
+  /* Cobranças no nome de gente que não está nesta folha. Ficam com status a conferir
+     até a folha da filial delas ser importada — aí o cruzamento resolve sozinho. */
+  function pintarForaDaFolha() {
+    var alvo = document.getElementById("fora-folha");
+    if (!alvo) return;
+    var grupos = pendenciasReferencia();
+    if (!grupos.length) { alvo.innerHTML = ""; return; }
+
+    alvo.innerHTML = '<div class="fora"><div class="fora-head">' +
+      "<h3><i></i>Cobrado na planilha e sem folha nesta competência — " + grupos.length + " a conferir</h3>" +
+      "<p>As planilhas das operadoras cobram estes valores no setor desta folha, mas ninguém com esse nome " +
+      "aparece na competência de " + mesAno(dados.competencia) + ". Ou a pessoa está na folha de outra filial " +
+      "que ainda não foi importada, ou a cobrança está indevida.</p></div>" +
+      '<div class="fora-lista">' + grupos.map(function (g) {
+        return '<div class="fora-item">' +
+          '<div class="nm">' + esc(g.nome) + "<small>" + esc(g.itens[0].origem) + "</small></div>" +
+          '<div class="itens">' + g.itens.map(function (i) {
+            return "<span>" + esc(i.rotulo) + "<b>" + num(i.valor) + "</b></span>";
+          }).join("") + "</div>" +
+          '<div class="lado"><span class="chip verificar">Conferir</span>' +
+            '<span class="tot">' + brl(g.total) + "</span></div>" +
+          "</div>";
+      }).join("") + "</div></div>";
   }
 
   /* ------------------------------------------------ lista */
@@ -369,10 +558,19 @@
       else if (Math.abs(dif) < 0.005) difTxt = '<span class="d-flat">—</span>';
       else { difTxt = '<span class="' + (dif > 0 ? "d-up" : "d-down") + '">' + (dif > 0 ? "+ " : "− ") + num(Math.abs(dif)) + "</span>"; cls = "diff"; }
 
-      var tag = "";
-      var c = confereBeneficio(l.codigo, vs);
+      var tag = "", erro = false;
+      var cf = conferenciaDoCodigo(p, l.codigo);
+      if (cf) {
+        erro = cf.situacao === "diverge" || cf.situacao === "sem_referencia";
+        tag = '<span class="tag ' + (erro ? "erro" : "good") + '" title="' + esc(tituloConferencia(cf)) + '">' +
+          (cf.situacao === "confere" ? "✓ planilha"
+            : cf.situacao === "diverge" ? "planilha: " + num(cf.referencia)
+            : "sem respaldo na planilha") + "</span>";
+      }
+      if (erro) cls += " erro-linha";
+      var c = !cf && confereBeneficio(l.codigo, vs);
       if (c) tag = '<span class="tag ' + (c.alerta ? "warn" : "good") + '">' + c.txt + "</span>";
-      else if (l.codigo === "642" && vs != null && p.salario_contratual) {
+      else if (!cf && l.codigo === "642" && vs != null && p.salario_contratual) {
         var b = beneficio("642");
         var pct = (vs / Number(p.salario_contratual)) * 100;
         var okPct = b ? Math.abs(pct - Number(b.valor)) < 0.06 : false;
@@ -386,6 +584,9 @@
         if (!rubr) return '<td class="mono v-old">—</td>';
         if (lado === "s" && corr)
           return '<td class="mono v-corr">' + num(corr.valor_corrigido) + "<small>folha: " + num(rubr.valor) + "</small></td>";
+        if (lado === "s" && erro)
+          return '<td class="mono v-erro">' + num(rubr.valor) + "<small>planilha: " +
+            (cf.referencia === null ? "nada" : num(cf.referencia)) + "</small></td>";
         return '<td class="mono ' + (lado === "a" ? "v-old" : "v-new") + '">' + num(rubr.valor) + "</td>";
       }
 
@@ -410,6 +611,22 @@
           "</div></td></tr>";
       }
     });
+
+    /* O que a planilha cobra e a folha não descontou não tem linha de rubrica:
+       sem isto, o desconto faltando passa em branco. */
+    var faltando = conferencia(p).filter(function (i) { return i.situacao === "faltando"; });
+    if (faltando.length) {
+      html += '<tr class="sub-head d"><td colspan="6">Cobrado na planilha e não descontado</td></tr>';
+      faltando.forEach(function (i) {
+        html += '<tr class="diff erro-linha"><td class="cod mono">' + esc(i.codigos[0]) + "</td>" +
+          '<td class="rub">' + esc(i.rotulo) +
+            '<span class="ref mono">' + esc(i.origem || "") + "</span>" +
+            '<span class="tag erro">não descontado</span></td>' +
+          '<td class="mono v-old">—</td>' +
+          '<td class="mono v-erro">0,00<small>planilha: ' + num(i.referencia) + "</small></td>" +
+          '<td class="mono"><span class="d-down">falta ' + num(i.referencia) + "</span></td><td></td></tr>";
+      });
+    }
 
     function tot(rot, va, vs) {
       var d = va != null && vs != null ? vs - va : null;
@@ -514,9 +731,41 @@
       });
     }
 
+    /* planilhas das operadoras e lista de vales: o desconto tem que bater com o que
+       está cobrado no nome da pessoa. É a conferência que o Júlio pediu em 30/09. */
+    conferencia(p).forEach(function (i) {
+      var onde = i.origem ? " (" + esc(i.origem) + ")" : "";
+      var nomeLa = i.nomeDiferente
+        ? " Na planilha o nome está escrito <b>" + esc(i.nomeRef) + "</b> — foi por aproximação que o sistema achou."
+        : "";
+      if (i.situacao === "diverge") {
+        var d = i.folha - i.referencia;
+        lista.push({ nivel: "grave", titulo: i.rotulo + " com valor diferente da planilha",
+          detalhe: "A folha descontou <b>" + brl(i.folha) + "</b> e a planilha" + onde + " cobra <b>" +
+            brl(i.referencia) + "</b> — " + (d > 0 ? "descontou <b>" + brl(d) + "</b> a mais"
+              : "faltam <b>" + brl(-d) + "</b>") + "." + nomeLa });
+      } else if (i.situacao === "faltando") {
+        lista.push({ nivel: "grave", titulo: i.rotulo + " cobrado e não descontado",
+          detalhe: "A planilha" + onde + " cobra <b>" + brl(i.referencia) +
+            "</b> desta pessoa e a folha não trouxe esse desconto." + nomeLa });
+      } else if (i.situacao === "sem_referencia") {
+        lista.push({ nivel: "grave",
+          titulo: i.tipo === "vale" ? "Vale sem justificativa" : i.rotulo + " sem respaldo na planilha",
+          detalhe: "A folha descontou <b>" + brl(i.folha) + "</b> e " +
+            (i.tipo === "vale"
+              ? "esta pessoa não está na lista de vales do mês."
+              : "não há cobrança no nome dela em nenhuma planilha de operadora.") });
+      } else if (i.nomeDiferente) {
+        lista.push({ nivel: "info", titulo: i.rotulo + " — nome diferente na planilha",
+          detalhe: "O valor bate (<b>" + brl(i.folha) + "</b>), mas na planilha" + onde +
+            " o nome está <b>" + esc(i.nomeRef) + "</b>. Vale pedir a correção para o cruzamento não falhar." });
+      }
+    });
+
     /* benefícios: o valor descontado precisa ser múltiplo exato do que está na tabela */
     parear(a && a.rubricas, p.rubricas).forEach(function (l) {
       if (VARIAVEL[l.codigo]) return;
+      if (temReferencia() && COD_REF[l.codigo]) return;
       var b = beneficio(l.codigo);
       if (!b) return;
 
@@ -622,15 +871,21 @@
       detalhes.push("Mudou " + contrato.join(" e ").toLowerCase() + " em relação ao mês anterior");
     }
 
-    if (statusBase(p) === "revisar") {
+    var probs = problemasConferencia(p);
+    if (probs.length) {
+      motivos.push(probs.some(function (i) { return i.tipo === "vale"; }) && probs.length === 1
+        ? "Vale" : "Desconto");
+      probs.forEach(function (i) { detalhes.push(tituloConferencia(i)); });
+    }
+    if (!probs.length && statusBase(p) === "revisar") {
       motivos.push("Benefício");
       detalhes.push("Benefício descontado fora do valor da tabela");
     }
 
     if (!motivos.length) return null;
 
-    /* a cor segue o motivo mais grave: contrato é alerta, o resto é atenção */
-    var tipo = contrato.length ? "contrato" : "evento";
+    /* a cor segue o motivo mais grave: contrato e desconto errado são alerta, o resto é atenção */
+    var tipo = contrato.length || probs.length ? "contrato" : "evento";
     var texto = motivos.length === 1
       ? motivos[0]
       : motivos.slice(0, -1).join(", ") + " e " + motivos[motivos.length - 1];
@@ -870,9 +1125,14 @@
         '<div class="modal-head"><div><div class="eyebrow">Configuração</div><h3>Benefícios descontados</h3>' +
         '<div class="meta"><span>Valores de referência usados na validação da folha</span></div></div>' +
         '<button class="x" id="fechar-cfg" aria-label="Fechar">×</button></div>' +
-        '<div class="modal-body"><div class="cfg-note">O sistema compara cada desconto de benefício com estes valores. ' +
-          "Quando a folha descontar <b>o dobro, o triplo ou um valor fora da tabela</b>, a pessoa aparece como " +
-          "<b>Revisar</b> e a rubrica fica marcada no comparativo.</div>" +
+        '<div class="modal-body"><div class="cfg-note">' + (temReferencia()
+          ? "Plano de saúde e odontológico <b>não se conferem mais por esta tabela</b>: desde " +
+            mesAno(dados.referencia_competencia) + " a referência é a <b>planilha da operadora, nome por nome</b>, " +
+            "junto com a lista de vales do mês. Esta tabela vale para o que não tem planilha — a contribuição " +
+            "negocial, por exemplo."
+          : "O sistema compara cada desconto de benefício com estes valores. Quando a folha descontar " +
+            "<b>o dobro, o triplo ou um valor fora da tabela</b>, a pessoa aparece como <b>Revisar</b> " +
+            "e a rubrica fica marcada no comparativo.") + "</div>" +
           '<div class="scroll-x"><table class="cfg-tbl"><thead><tr><th>Cód</th><th>Benefício</th><th>Tipo</th>' +
           '<th style="text-align:right;">Valor</th></tr></thead><tbody>' + linhas + "</tbody></table></div></div>" +
         '<div class="modal-foot"><div class="foot-msg">Vale para todos os departamentos.</div>' +
