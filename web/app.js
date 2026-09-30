@@ -303,6 +303,7 @@
   /* ------------------------------------------------ lista */
   function linha(p, i) {
     var st = statusFinal(p), base = statusBase(p);
+    var obs = observacaoCurta(p);
     var sbAtual = salarioBase(p.rubricas);
     var sbAnterior = p.anterior ? salarioBase(p.anterior.rubricas) : null;
     var dl = sbAtual !== null && sbAnterior !== null ? sbAtual - sbAnterior : null;
@@ -327,6 +328,9 @@
       '<div class="num mono col-liquido"><div class="a">' + brl(sbAtual) + '</div><div class="b">' +
         (sbAnterior !== null ? brl(sbAnterior) : "—") + "</div></div>" +
       '<div class="num mono col-delta">' + dlTxt + "</div>" +
+      '<div class="col-obs">' + (obs
+        ? '<span class="etiq ' + obs.tipo + '" title="' + esc(obs.completo) + '">' + esc(obs.texto) + "</span>"
+        : '<span class="etiq-vazia">—</span>') + "</div>" +
       '<div class="chip-wrap"><span class="chip ' + st + '">' + ROTULO[st] + "</span></div>" +
       "</div>";
   }
@@ -571,6 +575,35 @@
   }
 
   var MARCA = { grave: "⛔", atencao: "⚠", info: "ℹ" };
+
+  /* Rótulo curto para a lista: a anotação de quem conferiu tem prioridade;
+     sem ela, o próprio motivo vira etiqueta (ATESTADO, FÉRIAS, SALÁRIO...). */
+  function observacaoCurta(p) {
+    var anotacao = (p.validacao && p.validacao.observacao || "").trim();
+    if (anotacao) return { texto: anotacao, tipo: "anotada", completo: anotacao };
+
+    var evento = p.evento || "";
+    if (/atestado/i.test(evento)) return { texto: "Atestado", tipo: "evento", completo: evento };
+    if (/férias|ferias/i.test(evento)) return { texto: "Férias", tipo: "evento", completo: evento };
+    if (/admitid|admiss/i.test(evento)) return { texto: "Admissão", tipo: "evento", completo: evento };
+    if (/afastament/i.test(evento)) return { texto: "Afastamento", tipo: "evento", completo: evento };
+
+    if (!p.anterior) return { texto: "Admissão", tipo: "evento", completo: "Primeiro pagamento desta pessoa" };
+
+    var partes = [];
+    if (p.funcao !== p.anterior.funcao) partes.push("Função");
+    if (Number(p.salario_contratual) !== Number(p.anterior.salario_contratual)) partes.push("Salário");
+    if (partes.length) return { texto: partes.join(" e "), tipo: "contrato", completo: "Mudou " + partes.join(" e ").toLowerCase() + " em relação ao mês anterior" };
+
+    if (statusBase(p) === "revisar")
+      return { texto: "Benefício", tipo: "beneficio", completo: "Benefício descontado fora do valor da tabela" };
+
+    var eventoAnterior = (p.anterior && p.anterior.evento) || "";
+    if (/férias|ferias/i.test(eventoAnterior)) return { texto: "Voltou de férias", tipo: "evento", completo: eventoAnterior };
+    if (/atestado/i.test(eventoAnterior)) return { texto: "Atestado no mês anterior", tipo: "evento", completo: eventoAnterior };
+
+    return null;
+  }
 
   function painelObservacoes(p, obs) {
     var anotacao = (p.validacao && p.validacao.observacao) || "";
