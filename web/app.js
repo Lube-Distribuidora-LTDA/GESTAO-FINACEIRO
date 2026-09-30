@@ -217,13 +217,10 @@
     }).join("");
 
     var proxima = proximoMes();
-    document.getElementById("regra").innerHTML =
-      "<span>🔁</span><div>Cada mês é conferido contra o anterior. Agora é <b>" +
-      mesAno(dados.competencia_anterior) + " → " + mesAno(dados.competencia) +
-      "</b>; quando a folha de " + proxima.charAt(0).toUpperCase() + proxima.slice(1) +
-      " for carregada, o painel passa sozinho para <b>" + mesAno(dados.competencia) + " → " +
+    sel.title = "Cada mês é conferido contra o anterior. Quando a folha de " +
       proxima.charAt(0).toUpperCase() + proxima.slice(1) +
-      "</b>, e o que você confirmar agora vira a referência dessa comparação.</div>";
+      " for carregada, a comparação passa sozinha para " + mesAno(dados.competencia) +
+      " → " + proxima.charAt(0).toUpperCase() + proxima.slice(1) + ".";
   }
 
   function pintarTopo() {
@@ -253,14 +250,40 @@
         Math.abs(varPct).toFixed(1).replace(".", ",") + "%</span>");
     document.getElementById("k-novo-sub").textContent = "entraram em " + mesAno(dados.competencia).split("/")[0].toLowerCase();
 
+    /* card zerado não precisa gritar: sem alerta, ele fica sóbrio */
+    var cards = document.querySelectorAll(".kpi");
+    [cont.ok, cont.alerta, cont.revisar, cont.novo].forEach(function (v, i) {
+      cards[i].classList.toggle("vazio", v === 0);
+    });
+
+    /* a barra mostra a composição da folha, não só o quanto falta */
     var total = dados.colaboradores.length;
     var pend = cont.alerta + cont.revisar;
     document.getElementById("prog-txt").innerHTML =
       pend === 0
-        ? "<b>Tudo conferido</b> — nenhum colaborador pendente nesta competência."
-        : "<b>" + (total - pend) + " de " + total + "</b> colaboradores sem pendência · <b>" + pend + "</b> aguardando você";
+        ? "<b>" + total + "</b> colaboradores conferidos, nenhum pendente"
+        : "<b>" + (total - pend) + "</b> de <b>" + total + "</b> sem pendência · <b>" + pend + "</b> aguardando você";
+    document.getElementById("prog-pct").textContent = Math.round(((total - pend) / total) * 100) + "%";
+
+    var faixas = [
+      { chave: "ok", rotulo: "Conferidos", qtd: cont.ok, cor: "var(--green)" },
+      { chave: "alerta", rotulo: "Alerta", qtd: cont.alerta, cor: "var(--brand-red-lt)" },
+      { chave: "revisar", rotulo: "Revisar", qtd: cont.revisar, cor: "var(--amber)" },
+      { chave: "novo", rotulo: "Admissões", qtd: cont.novo, cor: "var(--info)" },
+    ].filter(function (f) { return f.qtd > 0; });
+
+    document.getElementById("prog").innerHTML = faixas.map(function (f) {
+      return '<i class="s-' + f.chave + '" title="' + f.rotulo + ": " + f.qtd + '"></i>';
+    }).join("");
+    document.getElementById("prog-legenda").innerHTML = faixas.map(function (f) {
+      return '<span><i style="background:' + f.cor + '"></i>' + f.rotulo + " <b>" + f.qtd + "</b></span>";
+    }).join("");
+
     setTimeout(function () {
-      document.getElementById("prog-bar").style.width = Math.round(((total - pend) / total) * 100) + "%";
+      var barras = document.querySelectorAll("#prog i");
+      faixas.forEach(function (f, i) {
+        if (barras[i]) barras[i].style.width = (f.qtd / total) * 100 + "%";
+      });
     }, 120);
 
     document.getElementById("panel-titulo").textContent =
